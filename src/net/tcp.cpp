@@ -158,12 +158,6 @@ _trim(char *addr, int *family) {
     return 0;
 }
 
-int
-_option(int fd) {
-    int reuse = 1;
-    return setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-}
-
 bool
 _parse(char *addr, size_t len, int *family, char **host, char **port) {
     size_t n = _trim(addr, family);
@@ -197,6 +191,12 @@ _parse(char *addr, size_t len, int *family, char **host, char **port) {
 }
 
 int
+_option(int fd) {
+    int reuse = 1;
+    return setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+}
+
+int
 _getsockerr(int fd) {
     int err = 0;
     socklen_t len = sizeof(err);
@@ -219,7 +219,6 @@ _getaddrinfo(const char *addr, struct addrinfo **res, int flag) {
     if (!_parse(copy, len, &family, &host, &port)) {
         return std::error_condition(net_errc::illegal_address);
     }
-
 
     struct addrinfo hint;
     memclr(&hint, sizeof hint);
