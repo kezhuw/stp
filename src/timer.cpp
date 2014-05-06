@@ -1,0 +1,290 @@
+#include "timer.hpp"
+#include "types.hpp"
+#include "message.hpp"
+#include "process.hpp"
+#include "module.hpp"
+
+#include <wild/freelist.hpp>
+#include <wild/module.hpp>
+
+#include <assert.h>
+#include <limits.h>
+#include <time.h>    // clock_gettime(2)
+
+#include <atomic>
+
+// About algorithm See:
+//
+// http://blog.codingnow.com/2007/05/Timer.html
+// https://github.com/cloudwu/skynet/blob/6ba28cd4420a4bbc4c65a009efdb2bd02741e7c1/skynet-src/skynet_timer.c
+
+namespace {
+
+using namespace stp;
+using namespace stp::timer;
+
+enum class Code {
+    Update      = 1,
+    Timeout     = 2,
+};
+
+message::Code make_message_code(Code code) {
+    return static_cast<message::Code>(code);
+}
+
+#define FIRST_NODE_FIELD    struct timer_node *link
+
+struct timer_node {
+    FIRST_NODE_FIELD;
+    uint64 expire;
+    // user data
+    process_t source;
+    session_t session;
+};
+
+struct timer_list {
+    struct _unused {
+        FIRST_NODE_FIELD = nullptr;
+    } dummy;
+    struct timer_node *tail = reinterpret_cast<timer_node*>(&dummy);
+};
+
+inline void
+_list_init(struct timer_list *l) {
+    l->dummy.link = NULL;
+    l->tail = (struct timer_node *)&l->dummy;
+}
+
+inline bool
+_list_empty(struct timer_list *l) {
+    return l->dummy.link == NULL;
+}
+
+inline void
+_list_append(struct timer_list *l, struct timer_node *n) {
+    l->tail->link = n;
+    l->tail = n;
+}
+
+inline struct timer_node *
+_list_clear(struct timer_list *l) {
+    l->tail->link = NULL;
+    struct timer_node *nodes = l->dummy.link;
+    _list_init(l);
+    return nodes;
+}
+
+#define TIME_LEAST_SHIFT    14
+#define TIME_LEAST_VALUE    (1<<TIME_LEAST_SHIFT)
+#define TIME_LEAST_MASK        (TIME_LEAST_VALUE-1)
+
+#define TIME_LEVEL_SHIFT    10
+#define TIME_LEVEL_VALUE    (1<<TIME_LEVEL_SHIFT)
+#define TIME_LEVEL_MASK        (TIME_LEVEL_VALUE-1)
+
+#define TIME_BITS        (CHAR_BIT*(int)sizeof(uint64))
+#define TIME_LEVEL_COUNT    ((TIME_BITS-TIME_LEAST_SHIFT)/TIME_LEVEL_SHIFT)
+
+static_assert(TIME_BITS == TIME_LEVEL_COUNT*TIME_LEVEL_SHIFT + TIME_LEAST_SHIFT, "time bits mismatch");
+
+struct Timer {
+    uint64 time = 0;
+    struct timer_list least[TIME_LEAST_VALUE];
+    struct timer_list level[TIME_LEVEL_COUNT][TIME_LEVEL_VALUE-1];
+    wild::FreeListT<timer_node> frees;
+};
+
+inline struct timer_node *
+_new_node(struct Timer *t) {
+    if (auto node = t->frees.Take()) {
+        return node;
+    }
+    return new timer_node;
+}
+
+inline void
+_free_node(struct Timer *t, struct timer_node *node) {
+    t->frees.Free(node);
+}
+
+inline void
+_send(process_t pid, session_t session) {
+    process::Response(pid, session, message::Code::None, message::Content{});
+}
+
+void
+_queue(struct Timer *t, struct timer_node *node) {
+    uint64 time = t->time;
+    uint64 expire = node->expire;
+    assert(expire >= time);
+    if (expire - time < TIME_LEAST_VALUE) {
+        uint64 index = expire & TIME_LEAST_MASK;
+        _list_append(&t->least[index], node);
+    } else {
+        uint64 level = 0;
+        uint64 exp2 = 1 << TIME_LEAST_SHIFT;
+        do {
+            exp2 <<= TIME_LEVEL_SHIFT;
+            uint64 mask = exp2 - 1;
+            if ((expire | mask) == (time | mask)) {
+                uint64 shift = TIME_LEAST_SHIFT + level*TIME_LEVEL_SHIFT;
+                uint64 value = (expire >> shift) & TIME_LEVEL_MASK;
+                _list_append(&t->level[level][value-1], node);
+                break;
+            }
+        } while (++level < TIME_LEVEL_COUNT);
+        assert(level < TIME_LEVEL_COUNT);
+    }
+}
+
+void
+_tick(struct Timer *t) {
+    uint64 index = t->time & TIME_LEAST_MASK;
+
+    if (!_list_empty(&t->least[index])) {
+        struct timer_node *list = _list_clear(&t->least[index]);
+        do {
+            struct timer_node *node = list;
+            list = list->link;
+
+            _send(node->source, node->session);
+            _free_node(t, node);
+        } while (list != NULL);
+    }
+
+    uint64 time = ++t->time;
+    if ((time & TIME_LEAST_MASK) == 0) {
+        assert(time != 0);
+        time >>= TIME_LEAST_SHIFT;
+        uint64 level=0;
+        do {
+            uint64 value = time & TIME_LEVEL_MASK;
+            if (value != 0) {
+                struct timer_node *list = _list_clear(&t->level[level][value-1]);
+                while (list != NULL) {
+                    struct timer_node *node = list;
+                    list = list->link;
+                    _queue(t, node);
+                }
+                break;
+            }
+            time >>= TIME_LEVEL_SHIFT;
+        } while (++level < TIME_LEVEL_COUNT);
+        assert(level < TIME_LEVEL_COUNT);
+    }
+}
+
+void
+_update(struct Timer *t, uint64 time) {
+    if (time > t->time) {
+        for (uint64 i=0, n = time - t->time; i<n; ++i) {
+            _tick(t);
+        }
+    }
+}
+
+void
+_timeout(struct Timer *t, process_t source, session_t session, uint64 timeout) {
+    struct timer_node *node = _new_node(t);
+    node->expire = t->time + timeout;
+    node->source = source;
+    node->session = session;
+    _queue(t, node);
+}
+
+void
+_main() {
+    struct Timer t;
+    process::HandleMessage(
+        message::Kind::Request,
+        make_message_code(Code::Timeout),
+        [&t] (process_t source, session_t session, const message::Content& content) {
+            _timeout(&t, source, session, static_cast<uint64>(content.Data));
+        });
+    process::HandleMessage(
+        message::Kind::Notify,
+        make_message_code(Code::Update),
+        [&t] (process_t, session_t , const message::Content& content) {
+            _update(&t, static_cast<uint64>(content.Data));
+        });
+    process::Run();
+}
+
+uint64
+_gettime() {
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    return (uint64)tp.tv_sec * 1000 + (uint64)tp.tv_nsec/1000000;
+}
+
+uint64
+_realtime() {
+    struct timespec tp;
+    clock_gettime(CLOCK_REALTIME, &tp);
+    return (uint64)tp.tv_sec * 1000 + (uint64)tp.tv_nsec/1000000;
+}
+
+std::atomic<uint64> TIME;
+
+// readonly after set.
+std::atomic<uint64> STARTTIME;
+std::atomic<uint64> STARTTIME_REALTIME;
+process_t TIMER_SERVICE;
+
+void
+init() {
+    STARTTIME.store(_gettime(), std::memory_order_relaxed);
+    STARTTIME_REALTIME.store(_realtime(), std::memory_order_relaxed);
+    TIMER_SERVICE = process::Spawn(_main, sizeof(struct Timer) + 8192);
+}
+
+wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Timer);
+
+}
+
+namespace stp {
+namespace timer {
+
+uint64
+Time() {
+    return TIME.load(std::memory_order_relaxed);
+}
+
+uint64
+StartTime() {
+    return STARTTIME_REALTIME.load(std::memory_order_relaxed);
+}
+
+uint64
+RealTime() {
+    return StartTime() + Time();
+}
+
+void
+Sleep(uint64 msecs) {
+    process::Request(TIMER_SERVICE, make_message_code(Code::Timeout), message::Content{uintptr(msecs), 0});
+}
+
+session_t
+Timeout(uint64 timeout) {
+    return process::Send(TIMER_SERVICE, message::Kind::Request, make_message_code(Code::Timeout),
+            message::Content{uintptr(timeout), 0});
+}
+
+uint64
+UpdateTime() {
+    uint64 now = _gettime();
+    assert(now >= STARTTIME.load(std::memory_order_relaxed));
+    uint64 time = now - STARTTIME.load(std::memory_order_relaxed);
+    if (time > TIME.load(std::memory_order_relaxed)) {
+        TIME.store(time, std::memory_order_relaxed);
+        process::Notify(
+            TIMER_SERVICE,
+            make_message_code(Code::Update),
+            message::Content{message::ResourceId::None, uintptr(time), 0});
+    }
+    return TIME.load(std::memory_order_relaxed);
+}
+
+}
+}
