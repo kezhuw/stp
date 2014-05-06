@@ -142,7 +142,7 @@ void Response(process_t pid, session_t session, message::Code code = message::Co
 
 template<typename CodeEnum, typename std::enable_if_t<message::is_message_code_enum<CodeEnum>::value>* = nullptr>
 Error Request(process_t pid, CodeEnum code, const message::Content& content, message::Content *resultp = nullptr) {
-	return Request(pid, make_message_code(code), content, resultp);
+    return Request(pid, make_message_code(code), content, resultp);
 }
 
 // Asynchronous sending, always success.

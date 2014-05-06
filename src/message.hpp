@@ -65,7 +65,7 @@ public:
     ForwardList(const ForwardList&) = delete;
 
     ForwardList(ForwardList&& other)
-	    : _head(other._head), _tail(other._tail) {}
+        : _head(other._head), _tail(other._tail) {}
 
     ForwardList& operator=(const ForwardList&) = delete;
     ForwardList& operator=(ForwardList&& other) = delete;

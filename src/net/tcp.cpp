@@ -134,9 +134,9 @@ string addressString(union sockaddr_all const& addr) {
     return "";
 }
 
-#define TCP_PREFIX	"tcp://"
-#define TCP4_PREFIX	"tcp4://"
-#define TCP6_PREFIX	"tcp6://"
+#define TCP_PREFIX      "tcp://"
+#define TCP4_PREFIX     "tcp4://"
+#define TCP6_PREFIX     "tcp6://"
 
 // ":6666"
 // "*:6060"
@@ -145,99 +145,99 @@ string addressString(union sockaddr_all const& addr) {
 // "tcp4://12.34.0.39:6666"
 size_t
 _trim(char *addr, int *family) {
-	*family = AF_UNSPEC;
-	if (strncmp(addr, TCP_PREFIX, sizeof(TCP_PREFIX)-1) == 0) {
-		return sizeof(TCP_PREFIX)-1;
-	} else if (strncmp(addr, TCP4_PREFIX, sizeof(TCP4_PREFIX)-1) == 0) {
-		*family = AF_INET;
-		return sizeof(TCP4_PREFIX)-1;
-	} else if (strncmp(addr, TCP6_PREFIX, sizeof(TCP6_PREFIX)-1) == 0) {
-		*family = AF_INET6;
-		return sizeof(TCP6_PREFIX)-1;
-	}
-	return 0;
+    *family = AF_UNSPEC;
+    if (strncmp(addr, TCP_PREFIX, sizeof(TCP_PREFIX)-1) == 0) {
+        return sizeof(TCP_PREFIX)-1;
+    } else if (strncmp(addr, TCP4_PREFIX, sizeof(TCP4_PREFIX)-1) == 0) {
+        *family = AF_INET;
+        return sizeof(TCP4_PREFIX)-1;
+    } else if (strncmp(addr, TCP6_PREFIX, sizeof(TCP6_PREFIX)-1) == 0) {
+        *family = AF_INET6;
+        return sizeof(TCP6_PREFIX)-1;
+    }
+    return 0;
 }
 
 int
 _option(int fd) {
-	int reuse = 1;
-	return setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    int reuse = 1;
+    return setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 }
 
 bool
 _parse(char *addr, size_t len, int *family, char **host, char **port) {
-	size_t n = _trim(addr, family);
-	addr += n;
-	len -= n;
+    size_t n = _trim(addr, family);
+    addr += n;
+    len -= n;
 
-	char *sep = static_cast<char*>(memrchr(addr, ':', len));
-	if (sep == NULL) return false;
+    char *sep = static_cast<char*>(memrchr(addr, ':', len));
+    if (sep == NULL) return false;
 
-	char *beg = NULL;
-	char *end = NULL;
-	if (addr[0] == '[') {
-		end = sep-1;
-		if (*end != ']') {
+    char *beg = NULL;
+    char *end = NULL;
+    if (addr[0] == '[') {
+        end = sep-1;
+        if (*end != ']') {
             return false;
-		}
-		beg = addr+1;
-	} else {
-		beg = addr;
-		end = sep;
-	}
-	assert(beg <= end);
-	if ((beg == end) || ((beg+1 == end) && beg[0] == '*')) {
-		*host = NULL;
-	} else {
-		*end = '\0';
-		*host = beg;
-	}
-	*port = sep+1;
+        }
+        beg = addr+1;
+    } else {
+        beg = addr;
+        end = sep;
+    }
+    assert(beg <= end);
+    if ((beg == end) || ((beg+1 == end) && beg[0] == '*')) {
+        *host = NULL;
+    } else {
+        *end = '\0';
+        *host = beg;
+    }
+    *port = sep+1;
     return true;
 }
 
 int
 _getsockerr(int fd) {
-	int err = 0;
-	socklen_t len = sizeof(err);
-	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == -1) {
-		err = errno;
-	}
-	return err;
+    int err = 0;
+    socklen_t len = sizeof(err);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == -1) {
+        err = errno;
+    }
+    return err;
 }
 
 std::error_condition
 _getaddrinfo(const char *addr, struct addrinfo **res, int flag) {
     size_t len = strlen(addr);
-	char copy[len+1];
-	memcpy(copy, addr, len);
-	copy[len] = '\0';
+    char copy[len+1];
+    memcpy(copy, addr, len);
+    copy[len] = '\0';
 
-	char *host = NULL;
-	char *port = NULL;
-	int family = AF_UNSPEC;
-	if (!_parse(copy, len, &family, &host, &port)) {
+    char *host = NULL;
+    char *port = NULL;
+    int family = AF_UNSPEC;
+    if (!_parse(copy, len, &family, &host, &port)) {
         return std::error_condition(net_errc::illegal_address);
-	}
+    }
 
 
-	struct addrinfo hint;
+    struct addrinfo hint;
     memclr(&hint, sizeof hint);
-	hint.ai_family = family;
-	hint.ai_socktype = SOCK_STREAM;
-	hint.ai_protocol = IPPROTO_TCP;
-	hint.ai_flags = flag | AI_NUMERICHOST | AI_NUMERICSERV;
+    hint.ai_family = family;
+    hint.ai_socktype = SOCK_STREAM;
+    hint.ai_protocol = IPPROTO_TCP;
+    hint.ai_flags = flag | AI_NUMERICHOST | AI_NUMERICSERV;
 
-	*res = NULL;
-	int err = getaddrinfo(host, port, &hint, res);
-	switch (err) {
-	case 0:
-		break;
-	case EAI_SYSTEM:
+    *res = NULL;
+    int err = getaddrinfo(host, port, &hint, res);
+    switch (err) {
+    case 0:
+        break;
+    case EAI_SYSTEM:
         return std::system_category().default_error_condition(errno);
-	default:
+    default:
         return gai_category().default_error_condition(err);
-	}
+    }
     if (*res == nullptr) {
         return std::error_condition(net_errc::no_match_addrinfo);
     }
@@ -246,9 +246,9 @@ _getaddrinfo(const char *addr, struct addrinfo **res, int flag) {
 
 void
 _closen(int n, int fds[]) {
-	while (n--) {
-		close(fds[n]);
-	}
+    while (n--) {
+        close(fds[n]);
+    }
 }
 
 }
@@ -262,30 +262,30 @@ namespace io = wild::io;
 
 std::tuple<wild::Fd, std::error_condition>
 Listen(const char *addr) {
-	struct addrinfo *res;
-	if (auto err = _getaddrinfo(addr, &res, AI_PASSIVE)) {
+    struct addrinfo *res;
+    if (auto err = _getaddrinfo(addr, &res, AI_PASSIVE)) {
         return std::make_tuple(wild::Fd(), err);
-	}
+    }
 
     int sockets[2];
     int nsocket = 0;
 
     int lastErrno = 0;
-	for (struct addrinfo *ai = res; ai != NULL && nsocket < 2; ai = ai->ai_next) {
-		int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_FLAGS, ai->ai_protocol);
-		if (fd != -1) {
-			if (_option(fd) == 0
-			 && bind(fd, ai->ai_addr, ai->ai_addrlen) == 0
-			 && listen(fd, SOMAXCONN) == 0) {
-				sockets[nsocket++] = fd;
-				continue;
-			}
+    for (struct addrinfo *ai = res; ai != NULL && nsocket < 2; ai = ai->ai_next) {
+        int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_FLAGS, ai->ai_protocol);
+        if (fd != -1) {
+            if (_option(fd) == 0
+             && bind(fd, ai->ai_addr, ai->ai_addrlen) == 0
+             && listen(fd, SOMAXCONN) == 0) {
+                sockets[nsocket++] = fd;
+                continue;
+            }
             lastErrno = errno;
-			close(fd);
-		}
+            close(fd);
+        }
         lastErrno = errno;
-	}
-	freeaddrinfo(res);
+    }
+    freeaddrinfo(res);
 
     if (nsocket == 0) {
         assert(lastErrno != 0);
