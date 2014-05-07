@@ -124,8 +124,8 @@ struct hash<std::tuple<stp::process_t, stp::session_t>> {
     typedef std::size_t value_type;
 
     value_type operator()(argument_type const& request) const {
-        return std::hash<stp::process_t>()(std::get<0>(request))
-             + std::hash<stp::session_t>()(std::get<1>(request));
+        return std::hash<stp::process_t>()(std::get<stp::process_t>(request))
+             + std::hash<stp::session_t>()(std::get<stp::session_t>(request));
     }
 };
 

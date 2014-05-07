@@ -161,8 +161,8 @@ void Wait(int fd, Event event) {
     std::tuple<process_t, session_t> s = process::MakeSession();
 
     struct filter *fi = FDSET.selectFilter(fd, event);
-    fi->source = std::get<0>(s).Value();
-    fi->session = std::get<1>(s).Value();
+    fi->source = std::get<process_t>(s).Value();
+    fi->session = std::get<session_t>(s).Value();
 
     int mode = static_cast<int>(event);
     assert(mode == 0 || mode == 1);
@@ -176,7 +176,7 @@ void Wait(int fd, Event event) {
         // reporting of fd, but no deletion is performed.
         _epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ev);
     };
-    process::Suspend(std::get<1>(s));
+    process::Suspend(std::get<session_t>(s));
 }
 
 }

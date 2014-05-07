@@ -665,7 +665,7 @@ private:
 
     ~Process() {
         for (auto request : _requestsMap) {
-            AbortRequest(std::get<0>(request), std::get<1>(request));
+            AbortRequest(std::get<process_t>(request), std::get<session_t>(request));
         }
         while (Message *msg = _inbox.Take()) {
             if (msg->kind == message::Kind::Request) {
@@ -1001,7 +1001,7 @@ public:
         SCOPE_EXIT {
             _locker.lock();
         };
-        process::Suspend(std::get<1>(session));
+        process::Suspend(std::get<session_t>(session));
     }
 
     void Notify() {
@@ -1027,7 +1027,7 @@ public:
             std::swap(blocks, _blocks);
         }
         for (std::tuple<process_t, session_t> session : blocks) {
-            Response(std::get<0>(session), std::get<1>(session));
+            Response(std::get<process_t>(session), std::get<session_t>(session));
         }
     }
 
