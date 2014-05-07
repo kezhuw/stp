@@ -127,7 +127,8 @@ string addressString(union sockaddr_all const& addr) {
     void *inetx_addr = (family == AF_INET) ? (void*)(&addr.v4.sin_addr) : (void*)(&addr.v6.sin6_addr);
     char tmp[std::max(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)];
     if (LIKELY(::inet_ntop(family, inetx_addr, tmp, static_cast<socklen_t>(sizeof tmp)) != nullptr)) {
-        return tmp;
+        string header = (family == AF_INET) ? "tcp4://" : "tcp6://";
+        return header + tmp;
     }
     fprintf(stderr, "[%s:%s:%d] inet_ntop() fail to fetch address: %s\n",
                     __FILE__, __func__, __LINE__, wild::os::strerror(errno));
