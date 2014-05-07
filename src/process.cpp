@@ -607,6 +607,9 @@ public:
     void Run() {
         for (;;) {
             Message *msg = nextMessage();
+            SCOPE_EXIT {
+                message::Delete(msg);
+            };
             MessageHandler handler = selectHandler(msg->kind, msg->code);
             if (handler) {
                 handler(msg->source, msg->session, msg->content);
