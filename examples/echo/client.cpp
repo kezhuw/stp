@@ -19,11 +19,11 @@ main() {
 
     auto client = [] (string namestr) {
         const char *name = namestr.c_str();
-        printf("%s: start\n", name);
+        fprintf(stderr, "%s: start\n", name);
         wild::Fd server;
         std::error_condition error;
         std::tie(server, error) = net::tcp::Connect("tcp4://*:3000");
-        printf("%s: connected\n", name);
+        fprintf(stderr, "%s: connected\n", name);
         if (error) {
             printf("%s: fail to connect: %s\n", name, error.message().c_str());
             process::Exit();
@@ -41,14 +41,14 @@ main() {
                 printf("%s: io::ReadFull(): %s\n", name, wild::os::strerror(err));
                 break;
             }
-            coroutine::Sleep(2000);
+            coroutine::Sleep(500);
         }
     };
 
     process::Spawn([&client] {
         char name[1024];
-        for (int i=1; i<10000; ++i) {
-            snprintf(name, sizeof name, "client %d\n", i);
+        for (int i=1; i<=10000; ++i) {
+            snprintf(name, sizeof name, "client %d", i);
             process::Spawn([&client, name = string(name)] {
                 client(std::move(name));
             });
