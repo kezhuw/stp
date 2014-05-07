@@ -48,7 +48,7 @@ main() {
     process::Spawn([&client] {
         char name[1024];
         for (int i=1; i<10000; ++i) {
-            snprintf(name, sizeof name, "clinet %d\n", i);
+            snprintf(name, sizeof name, "client %d\n", i);
             process::Spawn([&client, name = string(name)] {
                 client(std::move(name));
             });

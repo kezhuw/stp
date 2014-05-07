@@ -28,11 +28,10 @@ const size_t gPageSize = (size_t)sysconf(_SC_PAGESIZE);
 
 void* mstack(size_t& stacksize) {
     if (stacksize == 0) {
-        stacksize = gPageSize*5;
+        stacksize = 4*gPageSize;
     } else {
         size_t stackmask = gPageSize - 1;
         stacksize = (stacksize + stackmask) & (~stackmask);
-        stacksize += gPageSize;
     }
 
     size_t index = stacksize/gPageSize;
@@ -47,8 +46,11 @@ void* mstack(size_t& stacksize) {
         }
     }
 
-    void *stackbase =
-        mmap(nullptr, stacksize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    void *headPage = mmap(nullptr, stacksize+2*gPageSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    void *stackbase = static_cast<void*>(static_cast<byte_t*>(headPage) + gPageSize);
+    void *tailPage = static_cast<void*>(static_cast<byte_t*>(stackbase) + stacksize);
+    mprotect(headPage, gPageSize, PROT_NONE);
+    mprotect(tailPage, gPageSize, PROT_NONE);
     return stackbase;
 }
 
@@ -64,7 +66,8 @@ void munstack(void *stackbase, size_t stacksize) {
         return;
     }
 
-    int err = munmap(stackbase, stacksize);
+    void *headPage = static_cast<void*>(static_cast<byte_t*>(stackbase) - gPageSize);
+    int err = munmap(headPage, stacksize+2*gPageSize);
     assert(err == 0);
     (void)err;
 }
