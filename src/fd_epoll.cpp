@@ -158,11 +158,10 @@ namespace stp {
 namespace fd {
 
 void Wait(int fd, Event event) {
-    std::tuple<process_t, session_t> s = process::MakeSession();
-
+    process::Session session = process::NewSession();
     struct filter *fi = FDSET.selectFilter(fd, event);
-    fi->source = std::get<process_t>(s).Value();
-    fi->session = std::get<session_t>(s).Value();
+    fi->source = session.Pid().Value();
+    fi->session = session.Value().Value();
 
     int mode = static_cast<int>(event);
     assert(mode == 0 || mode == 1);
@@ -175,9 +174,8 @@ void Wait(int fd, Event event) {
         // differenate from BSD's kqueue, epoll's ONESHOT only disable
         // reporting of fd, but no deletion is performed.
         _epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ev);
-        process::ReleaseSession(std::get<session_t>(s));
     };
-    process::Suspend(std::get<session_t>(s));
+    process::Suspend(session.Value());
 }
 
 }

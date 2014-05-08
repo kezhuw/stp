@@ -7,7 +7,6 @@ namespace timer {
 
 // Millisecond resolution.
 
-session_t Timeout(uint64 mescs);
 void Sleep(uint64 msecs);
 
 void Timeout(process_t pid, session_t session, uint64 msecs);

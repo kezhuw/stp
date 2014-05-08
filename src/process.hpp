@@ -71,8 +71,6 @@ process_t Spawn(Closure&& closure, size_t stacksize = 0) {
     return Spawn(func, stacksize);
 }
 
-Process *New(const char *name, uintptr argument);
-
 uintptr Suspend(session_t);
 
 void Resume(Process *p);
@@ -87,15 +85,65 @@ process_t Pid();
 void Exit();
 void Kill(process_t pid);
 
-session_t NewSession();
-void ReleaseSession(session_t session);
+class Session {
+public:
 
-session_t NewSession(Process *p);
-void ReleaseSession(Process *p, session_t session);
+    Session(session_t session)
+        : _process(process::Running()), _session(session) {
+    }
 
-std::tuple<process_t, session_t> MakeSession();
+    Session(Process *p, session_t session)
+        : _process(p), _session(session) {
+    }
 
-Message *NextMessage();
+    Session(Session&& other)
+        : _process(other._process), _session(other._session) {
+        other._process = nullptr;
+        other._session = session_t(0);
+    }
+
+    ~Session() {
+        if (_session) {
+            close();
+        }
+    }
+
+    process_t Pid() const;
+    session_t Value() const {
+        return _session;
+    }
+
+    Session& operator=(Session&& other) {
+        if (_session) {
+            close();
+        }
+        _process = other._process;
+        _session = other._session;
+        other._process = nullptr;
+        other._session = session_t(0);
+        return *this;
+    }
+
+    explicit operator session_t() const {
+        return _session;
+    }
+
+    explicit operator bool() const {
+        return bool(_session);
+    }
+
+    Session(const Session&) = delete;
+    Session& operator=(const Session&) = delete;
+
+private:
+
+    void close();
+
+    Process * _process;
+    session_t _session;
+};
+
+Session NewSession();
 
 using MessageHandler = std::function<void(process_t, session_t, message::Content const&)>;
 using DefaultHandler = std::function<void(message::Kind, message::Code, process_t, session_t, message::Content const&)>;
@@ -149,8 +197,7 @@ Error Request(process_t pid, CodeEnum code, const message::Content& content, mes
 //
 // Error for message::Kind::Request is reported by receiving
 // (message::Kind::System, message::Code::Error).
-session_t Send(process_t pid, message::Kind kind, message::Code, const message::Content& content);
-void ReleaseSession(session_t session);
+void Send(process_t pid, session_t session, message::Kind kind, message::Code, const message::Content& content);
 
 class Mutex {
 public:

@@ -265,10 +265,9 @@ Sleep(uint64 msecs) {
     process::Request(TIMER_SERVICE, make_message_code(Code::Timeout), message::Content{uintptr(msecs), 0});
 }
 
-session_t
-Timeout(uint64 timeout) {
-    return process::Send(TIMER_SERVICE, message::Kind::Request, make_message_code(Code::Timeout),
-            message::Content{uintptr(timeout), 0});
+void
+Timeout(process_t pid, session_t session, uint64 msecs) {
+    process::Send(pid, session, message::Kind::Request, make_message_code(Code::Timeout), message::Content{uintptr(msecs), 0});
 }
 
 uint64

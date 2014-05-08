@@ -88,8 +88,6 @@ SetRunning(Process *p) {
     tProcess = p;
 }
 
-std::tuple<process_t, session_t> MakeSession();
-
 class Scope {
 public:
     Scope(Process *p) {
@@ -581,16 +579,16 @@ public:
         return Error::None;
     }
 
-    session_t NewSession() {
+    Session NewSession() {
         uint32 id = _sessions.NewId();
-        return session_t(id);
+        return Session(this, session_t(id));
     }
 
     void ReleaseSession(session_t session) {
         _sessions.Erase(session.Value());
     }
 
-    process_t Pid() {
+    process_t Pid() const {
         return _pid;
     }
 
@@ -829,22 +827,13 @@ uintptr Suspend(session_t session) {
     return Running()->Suspend(session);
 }
 
-session_t NewSession() {
-    return Running()->NewSession();
-}
-
-session_t NewSession(Process *p) {
-    return p->NewSession();
+Session NewSession() {
+    Process *running = process::Running();
+    return running->NewSession();
 }
 
 void ReleaseSession(session_t session) {
     Running()->ReleaseSession(session);
-}
-
-std::tuple<process_t, session_t>
-MakeSession() {
-    Process *self = Running();
-    return std::make_tuple(self->Pid(), self->NewSession());
 }
 
 void
@@ -869,13 +858,10 @@ Request(process_t pid, message::Code code, const message::Content& content, mess
         throw std::runtime_error("not in process");
     }
     if (Process *p = Find(pid)) {
-        session_t session = running->NewSession();
-        SCOPE_EXIT {
-            running->ReleaseSession(session);
-        };
-        p->PushMessage(message::New(Pid(), session, message::Kind::Request, code, content));
+        Session session = running->NewSession();
+        p->PushMessage(message::New(running->Pid(), session.Value(), message::Kind::Request, code, content));
         process::Unref(p);
-        return running->WaitResponse(session, resultp);
+        return running->WaitResponse(session.Value(), resultp);
     } else {
         return Error::LocalNotExist;
     }
@@ -897,41 +883,39 @@ void Response(process_t pid, session_t session, const message::Content& content)
     Response(pid, session, message::Code::None, content);
 }
 
-session_t Send(process_t pid, message::Kind kind, message::Code code, const message::Content& content) {
+void Send(process_t pid, session_t session, message::Kind kind, message::Code code, const message::Content& content) {
     switch (kind) {
     case message::Kind::System:
-        System(pid, session_t(0), code, content);
+        System(pid, session, code, content);
         break;
     case message::Kind::Notify:
         Notify(pid, code, content);
         break;
     case message::Kind::Request:
         if (Process *p = Find(pid)) {
-            Process *running = process::Running();
-            session_t session = running->NewSession();
             p->PushMessage(message::New(Pid(), session, message::Kind::Request, code, content));
             process::Unref(p);
-            return session;
         }
         break;
     default:
         break;
     }
-    return session_t(0);
 }
 
 void Yield() {
     auto running = process::Running();
     assert(running != nullptr);
-    session_t session = running->NewSession();
-    // XXX
-    //
-    // SessionReleaseGuard ? Always return it ?
-    SCOPE_EXIT {
-        running->ReleaseSession(session);
-    };
-    running->PushMessage(message::New(process_t(0), session, message::Kind::Response, message::Code::None, message::Content{}));
-    running->Suspend(session);
+    Session session = running->NewSession();
+    running->PushMessage(message::New(process_t(0), session.Value(), message::Kind::Response, message::Code::None, message::Content{}));
+    running->Suspend(session.Value());
+}
+
+process_t Session::Pid() const {
+    return _process->Pid();
+}
+
+void Session::close() {
+    _process->ReleaseSession(_session);
 }
 
 void Mutex::lock() {
@@ -940,10 +924,7 @@ void Mutex::lock() {
     assert(p != nullptr);
     assert(co != nullptr);
     process_t pid = p->Pid();
-    session_t session = p->NewSession();
-    SCOPE_EXIT {
-        p->ReleaseSession(session);
-    };
+    Session session = p->NewSession();
     // XXX In worst case, this coroutine is subject to starvation.
     for (;;) {
         WITH_LOCK(_mutex) {
@@ -951,12 +932,12 @@ void Mutex::lock() {
                 _owner = co;
                 return;
             }
-            _blocks.push(std::make_tuple(pid, session));
+            _blocks.push(std::make_tuple(pid, session.Value()));
         }
         // spurious wakeup is possible, so loop it.
         //
         // Ok to reuse old session after wakeup.
-        p->Suspend(session);
+        p->Suspend(session.Value());
     }
 }
 
@@ -996,15 +977,15 @@ public:
     }
 
     void Wait() {
-        std::tuple<process_t, session_t> session = process::MakeSession();
+        Session session = process::NewSession();
         WITH_LOCK(_mutex) {
             _locker.unlock();
-            _blocks.push_back(session);
+            _blocks.push_back(std::make_tuple(session.Pid(), session.Value()));
         }
         SCOPE_EXIT {
             _locker.lock();
         };
-        process::Suspend(std::get<session_t>(session));
+        process::Suspend(session.Value());
     }
 
     void Notify() {
@@ -1053,8 +1034,10 @@ Wakeup(Coroutine *co, uintptr result) {
 
 void Timeout(uint64 msecs, std::function<void()> func, size_t stacksize) {
     auto co = Coroutine::New(std::move(func), stacksize);
-    session_t session = timer::Timeout(msecs);
-    process::Running()->Suspend(co, session);
+    Process *running = process::Running();
+    process::Session session = running->NewSession();
+    timer::Timeout(running->Pid(), session.Value(), msecs);
+    running->Suspend(co, session.Value());
 }
 
 }
