@@ -175,6 +175,7 @@ void Wait(int fd, Event event) {
         // differenate from BSD's kqueue, epoll's ONESHOT only disable
         // reporting of fd, but no deletion is performed.
         _epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ev);
+        process::ReleaseSession(std::get<session_t>(s));
     };
     process::Suspend(std::get<session_t>(s));
 }

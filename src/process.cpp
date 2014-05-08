@@ -870,6 +870,9 @@ Request(process_t pid, message::Code code, const message::Content& content, mess
     }
     if (Process *p = Find(pid)) {
         session_t session = running->NewSession();
+        SCOPE_EXIT {
+            running->ReleaseSession(session);
+        };
         p->PushMessage(message::New(Pid(), session, message::Kind::Request, code, content));
         process::Unref(p);
         return running->WaitResponse(session, resultp);
