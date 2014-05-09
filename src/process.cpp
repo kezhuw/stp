@@ -574,7 +574,7 @@ public:
 
         if (resultp) {
             auto response = reinterpret_cast<Message*>(result);
-            *resultp = response->content;
+            *resultp = std::move(response->content);
         }
         return Error::None;
     }

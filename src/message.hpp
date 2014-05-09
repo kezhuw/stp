@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 
+#include <wild/any.hpp>
 #include <wild/types.hpp>
 #include <wild/spinlock.hpp>
 #include <wild/with_lock.hpp>
@@ -38,14 +39,7 @@ enum class ResourceId : uint32 {
     NEWMEM          = 1,
 };
 
-struct Content {
-    Content() : res(ResourceId::None), Data(0), Meta(0) {}
-    Content(uintptr data, uintptr meta) : res(ResourceId::None), Data(data), Meta(meta) {}
-    Content(ResourceId resd, uintptr data, uintptr meta) : res(resd), Data(data), Meta(meta) {}
-    ResourceId res;
-    uintptr Data;
-    uintptr Meta;
-};
+using Content = wild::Any;
 
 struct Message {
     process_t source;
@@ -53,7 +47,6 @@ struct Message {
     Kind kind;
     Code code;
     Content content;
-
     struct Message *link;
 };
 
@@ -117,7 +110,7 @@ inline void swap(ForwardList& a, ForwardList& b) {
     a.swap(b);
 }
 
-Message* New(process::process_t source, process::session_t session, message::Kind kind, message::Code code, const message::Content& content);
+Message* New(process::process_t source, process::session_t session, message::Kind kind, message::Code code, message::Content content);
 
 void Delete(Message *m);
 

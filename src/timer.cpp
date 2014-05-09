@@ -4,6 +4,7 @@
 #include "process.hpp"
 #include "module.hpp"
 
+#include <wild/any.hpp>
 #include <wild/freelist.hpp>
 #include <wild/module.hpp>
 
@@ -199,13 +200,15 @@ _main() {
         message::Kind::Request,
         make_message_code(Code::Timeout),
         [&t] (process_t source, session_t session, const message::Content& content) {
-            _timeout(&t, source, session, static_cast<uint64>(content.Data));
+            uint64 timeout = wild::Any::Cast<const uint64&>(content);
+            _timeout(&t, source, session, timeout);
         });
     process::HandleMessage(
         message::Kind::Notify,
         make_message_code(Code::Update),
-        [&t] (process_t, session_t , const message::Content& content) {
-            _update(&t, static_cast<uint64>(content.Data));
+        [&t] (process_t, session_t, const message::Content& content) {
+            uint64 timestamp = wild::Any::Cast<const uint64&>(content);
+            _update(&t, timestamp);
         });
     process::Run();
 }
@@ -262,12 +265,12 @@ RealTime() {
 
 void
 Sleep(uint64 msecs) {
-    process::Request(TIMER_SERVICE, make_message_code(Code::Timeout), message::Content{uintptr(msecs), 0});
+    process::Request(TIMER_SERVICE, make_message_code(Code::Timeout), msecs);
 }
 
 void
 Timeout(process_t pid, session_t session, uint64 msecs) {
-    process::Send(pid, session, message::Kind::Request, make_message_code(Code::Timeout), message::Content{uintptr(msecs), 0});
+    process::Send(pid, session, message::Kind::Request, make_message_code(Code::Timeout), msecs);
 }
 
 uint64
@@ -280,7 +283,7 @@ UpdateTime() {
         process::Notify(
             TIMER_SERVICE,
             make_message_code(Code::Update),
-            message::Content{message::ResourceId::None, uintptr(time), 0});
+            time);
     }
     return TIME.load(std::memory_order_relaxed);
 }
