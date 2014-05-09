@@ -9,6 +9,8 @@
 #include <thread>
 #include <condition_variable>
 
+#include <unistd.h>
+
 namespace  {
 
 using namespace stp;
@@ -95,7 +97,9 @@ Scheduler& scheduler() {
 }
 
 void init() {
-    scheduler().Start(8);
+    long r = sysconf(_SC_NPROCESSORS_ONLN);
+    size_t n = r < 0 ? 4 : static_cast<size_t>(r);
+    scheduler().Start(n);
 }
 
 wild::module::Definition sched(module::STP, "stp:sched", init, module::Order::Sched);
