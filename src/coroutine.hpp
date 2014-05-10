@@ -11,13 +11,13 @@ namespace coroutine {
 
 class Coroutine;
 
-Coroutine *Task(std::function<void()>func, size_t stacksize = 0);
-void Spawn(std::function<void()> func, size_t stacksize = 0);
+Coroutine *Task(std::function<void()>func, size_t addstack = 0);
+void Spawn(std::function<void()> func, size_t addstack = 0);
 
 void Wakeup(Coroutine *co, uintptr result = 0);
 
 void Sleep(wild::uint64 msecs);
-void Timeout(uint64 msecs, std::function<void()> func, size_t stacksize = 0);
+void Timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
 
 Coroutine *Running();
 

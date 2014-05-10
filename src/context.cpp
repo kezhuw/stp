@@ -27,12 +27,11 @@ struct stacklist {
 const size_t gPageSize = (size_t)sysconf(_SC_PAGESIZE);
 
 void* mstack(size_t& stacksize) {
-    if (stacksize == 0) {
-        stacksize = 4*gPageSize;
-    } else {
+    if (stacksize != 0) {
         size_t stackmask = gPageSize - 1;
         stacksize = (stacksize + stackmask) & (~stackmask);
     }
+    stacksize += 8*gPageSize;
 
     size_t index = stacksize/gPageSize;
     if (index < std::extent<decltype(gStacks)>::value) {

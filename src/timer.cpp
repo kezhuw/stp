@@ -238,7 +238,7 @@ void
 init() {
     STARTTIME.store(_gettime(), std::memory_order_relaxed);
     STARTTIME_REALTIME.store(_realtime(), std::memory_order_relaxed);
-    TIMER_SERVICE = process::Spawn(_main, sizeof(struct Timer) + 8192);
+    TIMER_SERVICE = process::Spawn(_main, sizeof(struct Timer));
 }
 
 wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Timer);

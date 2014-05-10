@@ -17,7 +17,7 @@
 namespace stp {
 namespace process {
 
-process_t Spawn(std::function<void()> func, size_t stacksize = 0);
+process_t Spawn(std::function<void()> func, size_t addstack = 0);
 
 class Callable {
 public:
@@ -66,9 +66,9 @@ template<typename Closure
        , std::enable_if_t<!std::is_same<Closure, std::function<void()>>::value>* = nullptr
        , std::enable_if_t<!std::is_copy_constructible<Closure>::value>* = nullptr
         >
-process_t Spawn(Closure&& closure, size_t stacksize = 0) {
+process_t Spawn(Closure&& closure, size_t addstack = 0) {
     std::function<void()> func = PCallable(new TClosure<std::remove_cv_t<Closure>>(std::forward<Closure>(closure)));
-    return Spawn(func, stacksize);
+    return Spawn(func, addstack);
 }
 
 uintptr Suspend(session_t);
