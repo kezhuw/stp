@@ -45,11 +45,12 @@ void* mstack(size_t& stacksize) {
         }
     }
 
-    void *headPage = mmap(nullptr, stacksize+2*gPageSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    void *stackbase = static_cast<void*>(static_cast<byte_t*>(headPage) + gPageSize);
-    void *tailPage = static_cast<void*>(static_cast<byte_t*>(stackbase) + stacksize);
-    mprotect(headPage, gPageSize, PROT_NONE);
-    mprotect(tailPage, gPageSize, PROT_NONE);
+    void *lowPage = mmap(nullptr, stacksize+2*gPageSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    assert(lowPage != MAP_FAILED);
+    void *stackbase = static_cast<void*>(static_cast<byte_t*>(lowPage) + gPageSize);
+    void *highPage = static_cast<void*>(static_cast<byte_t*>(stackbase) + stacksize);
+    mprotect(lowPage, gPageSize, PROT_NONE);
+    mprotect(highPage, gPageSize, PROT_NONE);
     return stackbase;
 }
 
@@ -65,8 +66,8 @@ void munstack(void *stackbase, size_t stacksize) {
         return;
     }
 
-    void *headPage = static_cast<void*>(static_cast<byte_t*>(stackbase) - gPageSize);
-    int err = munmap(headPage, stacksize+2*gPageSize);
+    void *lowPage = static_cast<void*>(static_cast<byte_t*>(stackbase) - gPageSize);
+    int err = munmap(lowPage, stacksize+2*gPageSize);
     assert(err == 0);
     (void)err;
 }
