@@ -97,8 +97,8 @@ Scheduler& scheduler() {
 }
 
 void init() {
-    long r = sysconf(_SC_NPROCESSORS_ONLN);
-    size_t n = r < 0 ? 4 : static_cast<size_t>(r);
+    unsigned r = std::thread::hardware_concurrency();
+    size_t n = (r == 0) ? 4 : static_cast<size_t>(r);
     scheduler().Start(n);
 }
 
