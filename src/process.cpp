@@ -1036,7 +1036,7 @@ void Timeout(uint64 msecs, std::function<void()> func, size_t stacksize) {
     auto co = Coroutine::New(std::move(func), stacksize);
     Process *running = process::Running();
     process::Session session = running->NewSession();
-    timer::Timeout(running->Pid(), session.Value(), msecs);
+    timer::Timeout(session.Value(), msecs);
     running->Suspend(co, session.Value());
 }
 
