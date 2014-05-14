@@ -35,12 +35,15 @@ message::Code make_message_code(Code code) {
 
 #define FIRST_NODE_FIELD    struct timer_node *link
 
+using pid_t = decltype(std::declval<process_t>().Value());
+using sid_t = decltype(std::declval<session_t>().Value());
+
 struct timer_node {
     FIRST_NODE_FIELD;
     uint64 expire;
     // user data
-    process_t source;
-    session_t session;
+    pid_t source;
+    sid_t session;
 };
 
 struct timer_list {
@@ -109,8 +112,8 @@ _free_node(struct Timer *t, struct timer_node *node) {
 }
 
 inline void
-_send(process_t pid, session_t session) {
-    process::Response(pid, session, message::Code::None, message::Content{});
+_send(pid_t pid, sid_t session) {
+    process::Response(process_t(pid), session_t(session), message::Code::None, message::Content{});
 }
 
 void
@@ -188,8 +191,8 @@ void
 _timeout(struct Timer *t, process_t source, session_t session, uint64 timeout) {
     struct timer_node *node = _new_node(t);
     node->expire = t->time + timeout;
-    node->source = source;
-    node->session = session;
+    node->source = source.Value();
+    node->session = session.Value();
     _queue(t, node);
 }
 
