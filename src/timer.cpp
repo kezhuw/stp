@@ -10,9 +10,9 @@
 
 #include <assert.h>
 #include <limits.h>
-#include <time.h>    // clock_gettime(2)
 
 #include <atomic>
+#include <chrono>
 
 // About algorithm See:
 //
@@ -218,16 +218,16 @@ _main() {
 
 uint64
 _gettime() {
-    struct timespec tp;
-    clock_gettime(CLOCK_MONOTONIC, &tp);
-    return (uint64)tp.tv_sec * 1000 + (uint64)tp.tv_nsec/1000000;
+    auto now = std::chrono::steady_clock::now();
+    auto msecs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+    return static_cast<uint64>(msecs.count());
 }
 
 uint64
 _realtime() {
-    struct timespec tp;
-    clock_gettime(CLOCK_REALTIME, &tp);
-    return (uint64)tp.tv_sec * 1000 + (uint64)tp.tv_nsec/1000000;
+    auto now = std::chrono::system_clock::now();
+    auto msecs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+    return static_cast<uint64>(msecs.count());
 }
 
 std::atomic<uint64> TIME;
