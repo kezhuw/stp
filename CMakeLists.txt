@@ -13,5 +13,9 @@ set(CXX_FLAGS
 
 string(REPLACE ";" " " CMAKE_CXX_FLAGS "${CXX_FLAGS}")
 
+find_package(wild REQUIRED)
+include_directories(SYSTEM ${wild_INCLUDE_DIR})
+link_directories(${wild_LIBRARY_DIR})
+
 add_subdirectory(src stp)
 add_subdirectory(examples)
