@@ -972,23 +972,29 @@ void Mutex::unlock() {
 
 class Condition {
 public:
-    Condition(process::Mutex& locker)
-        : _locker(locker) {
-    }
 
-    void Wait() {
+    Condition() = default;
+    ~Condition() = default;
+
+    Condition(const Condition&) = delete;
+    Condition& operator=(const Condition&) = delete;
+
+    Condition(Condition&&) = delete;
+    Condition& operator=(Condition&&) = delete;
+
+    void wait(Mutex& locker) {
         Session session = process::NewSession();
         WITH_LOCK(_mutex) {
-            _locker.unlock();
+            locker.unlock();
             _blocks.push_back(std::make_tuple(session.Pid(), session.Value()));
         }
         SCOPE_EXIT {
-            _locker.lock();
+            locker.lock();
         };
         process::Suspend(session.Value());
     }
 
-    void Notify() {
+    void notify_one() {
         process_t pid; session_t session;
         WITH_LOCK(_mutex) {
             if (_blocks.empty()) {
@@ -1002,7 +1008,7 @@ public:
         }
     }
 
-    void Broadcast() {
+    void notify_all() {
         std::deque<std::tuple<process_t, session_t>> blocks;
         WITH_LOCK(_mutex) {
             if (_blocks.empty()) {
@@ -1018,7 +1024,6 @@ public:
 private:
     std::deque<std::tuple<process_t, session_t>> _blocks;
     process::Mutex _mutex;
-    process::Mutex& _locker;
 };
 
 }
