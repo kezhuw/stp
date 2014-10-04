@@ -221,6 +221,28 @@ private:
     std::queue<std::tuple<process_t, session_t>> _blocks;
 };
 
+class Condition {
+public:
+
+    Condition() = default;
+    ~Condition() = default;
+
+    Condition(const Condition&) = delete;
+    Condition& operator=(const Condition&) = delete;
+
+    Condition(Condition&&) = delete;
+    Condition& operator=(Condition&&) = delete;
+
+    void wait(Mutex& locker);
+
+    void notify_one();
+    void notify_all();
+
+private:
+    std::deque<std::tuple<process_t, session_t>> _blocks;
+    process::Mutex _mutex;
+};
+
 // Only for scheduler.
 class ForwardList {
 public:

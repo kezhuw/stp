@@ -970,61 +970,44 @@ void Mutex::unlock() {
     }
 }
 
-class Condition {
-public:
-
-    Condition() = default;
-    ~Condition() = default;
-
-    Condition(const Condition&) = delete;
-    Condition& operator=(const Condition&) = delete;
-
-    Condition(Condition&&) = delete;
-    Condition& operator=(Condition&&) = delete;
-
-    void wait(Mutex& locker) {
-        Session session = process::NewSession();
-        WITH_LOCK(_mutex) {
-            locker.unlock();
-            _blocks.push_back(std::make_tuple(session.Pid(), session.Value()));
-        }
-        SCOPE_EXIT {
-            locker.lock();
-        };
-        process::Suspend(session.Value());
+void Condition::wait(Mutex& locker) {
+    Session session = process::NewSession();
+    WITH_LOCK(_mutex) {
+        locker.unlock();
+        _blocks.push_back(std::make_tuple(session.Pid(), session.Value()));
     }
+    SCOPE_EXIT {
+        locker.lock();
+    };
+    process::Suspend(session.Value());
+}
 
-    void notify_one() {
-        process_t pid; session_t session;
-        WITH_LOCK(_mutex) {
-            if (_blocks.empty()) {
-                return;
-            }
-            std::tie(pid, session) = _blocks.front();
-            _blocks.pop_front();
+void Condition::notify_one() {
+    process_t pid; session_t session;
+    WITH_LOCK(_mutex) {
+        if (_blocks.empty()) {
+            return;
         }
-        if (pid) {
-            Response(pid, session);
-        }
+        std::tie(pid, session) = _blocks.front();
+        _blocks.pop_front();
     }
-
-    void notify_all() {
-        std::deque<std::tuple<process_t, session_t>> blocks;
-        WITH_LOCK(_mutex) {
-            if (_blocks.empty()) {
-                return;
-            }
-            std::swap(blocks, _blocks);
-        }
-        for (std::tuple<process_t, session_t> session : blocks) {
-            Response(std::get<process_t>(session), std::get<session_t>(session));
-        }
+    if (pid) {
+        Response(pid, session);
     }
+}
 
-private:
-    std::deque<std::tuple<process_t, session_t>> _blocks;
-    process::Mutex _mutex;
-};
+void Condition::notify_all() {
+    std::deque<std::tuple<process_t, session_t>> blocks;
+    WITH_LOCK(_mutex) {
+        if (_blocks.empty()) {
+            return;
+        }
+        std::swap(blocks, _blocks);
+    }
+    for (std::tuple<process_t, session_t> session : blocks) {
+        Response(std::get<process_t>(session), std::get<session_t>(session));
+    }
+}
 
 }
 
