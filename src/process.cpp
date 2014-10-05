@@ -383,6 +383,36 @@ void Mutex::unlock() {
     }
 }
 
+void Condition::wait(Mutex& locker) {
+    Coroutine *running = Running();
+    assert(running != nullptr);
+    WITH_LOCK(_mutex) {
+        locker.unlock();
+        _blocks.Push(running);
+    }
+    coroutine::Yield();
+}
+
+void Condition::notify_one() {
+    Coroutine *co;
+    WITH_LOCK(_mutex) {
+        co = _blocks.Take();
+    }
+    if (co) {
+        coroutine::Wakeup(co);
+    }
+}
+
+void Condition::notify_all() {
+    ForwardList blocks;
+    WITH_LOCK(_mutex) {
+        blocks = std::move(_blocks);
+    }
+    while (Coroutine *co = blocks.Take()) {
+        coroutine::Wakeup(co);
+    }
+}
+
 }
 
 namespace process {

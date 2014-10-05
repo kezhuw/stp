@@ -33,6 +33,13 @@ public:
     Coroutine *Front() const;
     bool Empty() const;
 
+    ForwardList& operator=(ForwardList&& other) {
+        _head = other._head;
+        _tail = other._tail;
+        other._head = other._tail = nullptr;
+        return *this;
+    }
+
 private:
     Coroutine *_head = nullptr;
     Coroutine *_tail = nullptr;
@@ -40,6 +47,8 @@ private:
 
 class Mutex {
 public:
+
+    Mutex() = default;
 
     void lock();
     void unlock();
@@ -54,6 +63,28 @@ public:
 
 private:
     ForwardList _coroutines;
+};
+
+class Condition {
+public:
+
+    Condition() = default;
+    ~Condition() = default;
+
+    Condition(const Condition&) = delete;
+    Condition& operator=(const Condition&) = delete;
+
+    Condition(Condition&&) = delete;
+    Condition& operator=(Condition&&) = delete;
+
+    void wait(Mutex& locker);
+
+    void notify_one();
+    void notify_all();
+
+private:
+    Mutex _mutex;
+    ForwardList _blocks;
 };
 
 }
