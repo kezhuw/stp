@@ -24,15 +24,6 @@ namespace {
 using namespace stp;
 using namespace stp::timer;
 
-enum class Code {
-    Update      = 1,
-    Timeout     = 2,
-};
-
-message::Code make_message_code(Code code) {
-    return static_cast<message::Code>(code);
-}
-
 #define FIRST_NODE_FIELD    struct timer_node *link
 
 using pid_t = decltype(std::declval<process_t>().Value());
@@ -113,7 +104,7 @@ _free_node(struct Timer *t, struct timer_node *node) {
 
 inline void
 _send(pid_t pid, sid_t session) {
-    process::Response(process_t(pid), session_t(session), message::Code::None, message::Content{});
+    process::Response(process_t(pid), session_t(session), message::Content{});
 }
 
 void
@@ -196,24 +187,24 @@ _timeout(struct Timer *t, process_t source, session_t session, uint64 timeout) {
     _queue(t, node);
 }
 
+struct UpdateMessage {
+    uint64 timestamp;
+};
+
+struct TimeoutMessage {
+    uint64 timeout;
+};
+
 void
 _main() {
     struct Timer t;
-    process::HandleMessage(
-        message::Kind::Request,
-        make_message_code(Code::Timeout),
-        [&t] (process_t source, session_t session, const message::Content& content) {
-            uint64 timeout = wild::Any::Cast<const uint64&>(content);
-            _timeout(&t, source, session, timeout);
-        });
-    process::HandleMessage(
-        message::Kind::Notify,
-        make_message_code(Code::Update),
-        [&t] (process_t, session_t, const message::Content& content) {
-            uint64 timestamp = wild::Any::Cast<const uint64&>(content);
-            _update(&t, timestamp);
-        });
-    process::Run();
+    process::Loop([&t](process_t source, session_t session, message::Content content) {
+        if (UpdateMessage *update = wild::Any::Cast<UpdateMessage>(&content)) {
+            _update(&t, update->timestamp);
+        } else if (TimeoutMessage *timeout = wild::Any::Cast<TimeoutMessage>(&content)) {
+            _timeout(&t, source, session, timeout->timeout);
+        }
+    });
 }
 
 uint64
@@ -268,12 +259,12 @@ RealTime() {
 
 void
 Sleep(uint64 msecs) {
-    process::Request(TIMER_SERVICE, make_message_code(Code::Timeout), msecs);
+    process::Request(TIMER_SERVICE, TimeoutMessage{msecs});
 }
 
 void
 Timeout(session_t session, uint64 msecs) {
-    process::Send(TIMER_SERVICE, session, message::Kind::Request, make_message_code(Code::Timeout), msecs);
+    process::Send(TIMER_SERVICE, session, TimeoutMessage{msecs});
 }
 
 uint64
@@ -283,10 +274,7 @@ UpdateTime() {
     uint64 time = now - STARTTIME.load(std::memory_order_relaxed);
     if (time > TIME.load(std::memory_order_relaxed)) {
         TIME.store(time, std::memory_order_relaxed);
-        process::Notify(
-            TIMER_SERVICE,
-            make_message_code(Code::Update),
-            time);
+        process::Send(TIMER_SERVICE, UpdateMessage{time});
     }
     return TIME.load(std::memory_order_relaxed);
 }

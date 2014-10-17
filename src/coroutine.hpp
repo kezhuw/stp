@@ -13,7 +13,7 @@ class Coroutine;
 
 void Spawn(std::function<void()> func, size_t addstack = 0);
 
-void Wakeup(Coroutine *co, uintptr result = 0);
+void Wakeup(Coroutine *co);
 
 void Sleep(wild::uint64 msecs);
 void Timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);

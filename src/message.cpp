@@ -45,9 +45,9 @@ deallocMessage(Message *m) {
 namespace stp {
 namespace message {
 
-Message *New(process_t source, session_t session, message::Kind kind, message::Code code, message::Content content) {
+Message *New(process_t source, session_t session, message::Content content) {
     auto m = allocMessage();
-    return new (m) Message{source, session, kind, code, content, nullptr};
+    return new (m) Message{source, session, content, nullptr};
 }
 
 void Delete(Message *msg) {

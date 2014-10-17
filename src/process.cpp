@@ -33,6 +33,38 @@ namespace stp {
 using Process = process::Process;
 using Coroutine = coroutine::Coroutine;
 
+enum class SystemCode {
+    kKill,
+    kAbort,
+    kError,
+};
+
+struct SystemMessage {
+    SystemCode code;
+};
+
+struct AbortedRequest {};
+
+enum class MessageType {
+    kNotify     = 0,
+    kRequest    = 1,
+    kResponse   = 2,
+};
+
+session_t sessionForResponse(session_t session) {
+    return session_t(-session.Value());
+}
+
+MessageType typeOfMessage(message::Message *msg) {
+    int32 session = static_cast<int32>(msg->session.Value());
+    if (session > 0) {
+        return MessageType::kRequest;
+    } else if (session < 0) {
+        return MessageType::kResponse;
+    }
+    return MessageType::kNotify;
+}
+
 namespace coroutine {
 
 static thread_local context::Context *tContext = context::New();
@@ -56,7 +88,7 @@ SetRunning(Coroutine *co) {
 
 void Die(Coroutine *co);
 
-wild::uintptr Yield();
+void Yield();
 
 class Scope {
 public:
@@ -131,6 +163,29 @@ void Unref(Process *);
 
 namespace coroutine {
 
+class Result {
+public:
+
+    void set_value(message::Content value) {
+        _value = std::move(value);
+    }
+
+    void set_exception(const std::exception_ptr &e) {
+        _exception = e;
+    }
+
+    message::Content get_value() {
+        if (_exception) {
+            std::rethrow_exception(_exception);
+        }
+        return std::move(_value);
+    }
+
+private:
+    message::Content _value;
+    std::exception_ptr _exception;
+};
+
 class Coroutine {
 public:
 
@@ -138,32 +193,16 @@ public:
         return _context;
     }
 
-    uintptr Result() {
-        return _result;
+    message::Content GetResult() {
+        return _result.get_value();
     }
 
-    void SetResult(uintptr value) {
-        _result = value;
+    void SetResult(message::Content value) {
+        _result.set_value(std::move(value));
     }
 
-    void SetException(std::exception_ptr e) {
-        _exception = std::move(e);
-    }
-
-    void ClearResult() {
-        _result = 0;
-        _exception = std::exception_ptr();
-    }
-
-    uintptr FetchResult() {
-        if (UNLIKELY(bool(_exception))) {
-            std::exception_ptr e;
-            std::swap(e, _exception);
-            std::rethrow_exception(e);
-        }
-        uintptr v = _result;
-        _result = 0;
-        return v;
+    void SetException(const std::exception_ptr &e) {
+        _result.set_exception(e);
     }
 
     // TODO allocate from thread local coroutine pool.
@@ -183,8 +222,7 @@ public:
 private:
 
     Coroutine(std::function<void()> func, size_t stacksize)
-        : _result(0)
-        , _context(nullptr)
+        : _context(nullptr)
         , _function(std::move(func)) {
 #define CoroutineMain   reinterpret_cast<void(*)(void*)>(&Coroutine::Main)
         _context = context::New(stacksize, CoroutineMain, static_cast<void*>(this));
@@ -206,12 +244,11 @@ private:
             _function();
         } catch (coroutine::ExitException&) {
         } catch (...) {
-            _exception = std::current_exception();
+            _result.set_exception(std::current_exception());
         }
     }
 
-    uintptr _result;
-    std::exception_ptr _exception;
+    Result _result;
     context::Context *_context;
     std::function<void()> _function;
 
@@ -277,12 +314,11 @@ void Exit() {
     throw coroutine::ExitException();
 }
 
-wild::uintptr Yield() {
+void Yield() {
     Coroutine *running = Running();
     assert(running != nullptr);
     context::Switch(running->Context(), coroutine::ThreadContext());
     assert(running == Running());
-    return running->FetchResult();
 }
 
 void Resume(Coroutine *co) {
@@ -395,9 +431,6 @@ static inline void Schedule(Process *p) {
     sched::Schedule(p);
 }
 
-static void gUnknownHandler(message::Kind, message::Code, process_t, session_t, message::Content const&) {
-}
-
 class Process {
 public:
 
@@ -410,10 +443,11 @@ public:
 
     message::Message *PopMessage();
 
-    uintptr Suspend(session_t session) {
-        assert(coroutine::Running() != nullptr);
-        _block_sessions[session] = coroutine::Running();
-        return coroutine::Yield();
+    message::Content Suspend(session_t session) {
+        Coroutine *running = coroutine::Running();
+        _block_sessions[session] = running;
+        coroutine::Yield();
+        return running->GetResult();
     }
 
     void Suspend(Coroutine *co, session_t session) {
@@ -431,15 +465,9 @@ public:
     }
 
     void Schedule() {
-        while (Coroutine *co = _abort_coroutines.Take()) {
-            coroutine::Resume(co);
-        }
-
         // No blocked session will be unblocked.
         while (Coroutine *co = _unblock_coroutines.Take()) {
-            Message *msg = reinterpret_cast<Message*>(co->Result());
             coroutine::Resume(co);
-            message::Delete(msg);
         }
 
         // running coroutine may:
@@ -463,8 +491,7 @@ public:
         return _wakeup_coroutines.Empty() && _block_sessions.empty() && _inbox_coroutines.Empty();
     }
 
-    void Wakeup(Coroutine *co, uintptr result) {
-        co->SetResult(result);
+    void Wakeup(Coroutine *co) {
         _wakeup_coroutines.Push(co);
     }
 
@@ -482,37 +509,32 @@ public:
         }
         auto msg = _mailbox.Take();
         if (msg != nullptr) {
-            switch (msg->kind) {
-            case message::Kind::System:
-                switch (msg->code) {
-                case message::Code::Kill:
-                case message::Code::Error:
-                    break;
-                case message::Code::Abort:
-                    if (Coroutine *co = unblock(msg->session)) {
-                        printf("session[%u] aborted\n", msg->session.Value());
-                        co->SetResult(static_cast<uintptr>(Error::RuntimeError));
-                        _abort_coroutines.Push(co);
-                    }
-                    break;
-                default:
-                    break;
-                }
-                message::Delete(msg);
+            MessageType msgType = typeOfMessage(msg);
+            switch (msgType) {
+            case MessageType::kRequest:
+                ServeRequest(msg->source, msg->session);
+                _inbox.Push(msg);
                 break;
-            case message::Kind::Response:
-                if (Coroutine *co = unblock(msg->session)) {
-                    co->SetResult(reinterpret_cast<uintptr>(msg));
+            case MessageType::kResponse: {
+                uint32 session = -msg->session.Value();
+                if (Coroutine *co = unblock(session_t(session))) {
+                    if (msg->content.type() == typeid(AbortedRequest)) {
+                        co->SetException(std::make_exception_ptr(AbortException{}));
+                    } else {
+                        co->SetResult(std::move(msg->content));
+                    }
                     _unblock_coroutines.Push(co);
                 } else {
-                    printf("unknown response session[%u]\n", msg->session.Value());
-                    message::Delete(msg);
+                    printf("unknown response session[%u]\n", session);
                 }
-                break;
-            case message::Kind::Request:
-                ServeRequest(msg->source, msg->session);
-            default:
+                message::Delete(msg);
+                } break;
+            case MessageType::kNotify:
+                if (msg->content.type() == typeid(SystemMessage)) {
+                    break;
+                }
                 _inbox.Push(msg);
+                break;
             }
             // Schedule();
             return ResumeResult::Resume;
@@ -520,36 +542,15 @@ public:
         return ResumeResult::Break;
     }
 
-    void Response(process_t source, session_t session, message::Code code, const message::Content& content) {
+    void Response(process_t source, session_t session, message::Content content) {
         if (Process *p = Find(source)) {
-            p->PushMessage(message::New(Pid(), session, message::Kind::Response, code, content));
+            p->PushMessage(message::New(Pid(), sessionForResponse(session), std::move(content)));
             process::Unref(p);
         }
         DoneRequest(source, session);
     }
 
     std::unordered_set<std::tuple<process_t, session_t>> _requestsMap;
-
-    Error WaitResponse(session_t session, message::Content *resultp) {
-        uintptr result = Suspend(session);
-        Error error = static_cast<decltype(error.Value)>(result);
-        switch (error.Value) {
-        case Error::None:
-            return Error::RuntimeError;
-        case Error::RuntimeError:
-        case Error::RemoteNotExist:
-        case Error::UnknownMessage:
-            return error;
-        default:
-            break;
-        }
-
-        if (resultp) {
-            auto response = reinterpret_cast<Message*>(result);
-            *resultp = std::move(response->content);
-        }
-        return Error::None;
-    }
 
     Session NewSession() {
         uint32 id = _sessions.NewId();
@@ -574,30 +575,14 @@ public:
         return _inbox.Take();
     }
 
-    void Run() {
+    void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
         for (;;) {
             Message *msg = nextMessage();
             SCOPE_EXIT {
                 message::Delete(msg);
             };
-            MessageHandler handler = selectHandler(msg->kind, msg->code);
-            if (handler) {
-                handler(msg->source, msg->session, msg->content);
-            } else if (_defaultHandler) {
-                _defaultHandler(msg->kind, msg->code, msg->source, msg->session, msg->content);
-            } else {
-                gUnknownHandler(msg->kind, msg->code, msg->source, msg->session, msg->content);
-            }
+            callback(msg->source, msg->session, std::move(msg->content));
         }
-    }
-
-    void HandleMessage(message::Kind kind, message::Code code, MessageHandler handler) {
-        uint64 index = static_cast<uint64>(kind) | (static_cast<uint64>(code) << 32);
-        _handlers[index] = std::move(handler);
-    }
-
-    void DefaultMessage(DefaultHandler handler) {
-        _defaultHandler = handler;
     }
 
     static Process *New(std::function<void()> func, size_t stacksize) {
@@ -617,7 +602,7 @@ public:
     }
 
     void AbortRequest(process_t source, session_t session) {
-        process::System(source, session, message::Code::Abort);
+        process::Send(source, sessionForResponse(session), AbortedRequest{});
     }
 
     // XXX
@@ -638,30 +623,18 @@ private:
             AbortRequest(std::get<process_t>(request), std::get<session_t>(request));
         }
         while (Message *msg = _inbox.Take()) {
-            if (msg->kind == message::Kind::Request) {
+            if (typeOfMessage(msg) == MessageType::kRequest) {
                 AbortRequest(msg->source, msg->session);
             }
             message::Delete(msg);
         }
         while (Message *msg = _mailbox.Take()) {
-            if (msg->kind == message::Kind::Request) {
+            if (typeOfMessage(msg) == MessageType::kRequest) {
                 AbortRequest(msg->source, msg->session);
             }
             message::Delete(msg);
         }
     }
-
-    MessageHandler selectHandler(message::Kind kind, message::Code code) {
-        uint64 index = static_cast<uint64>(kind) | (static_cast<uint64>(code) << 32);
-        auto it = _handlers.find(index);
-        if (it == _handlers.end()) {
-            return nullptr;
-        }
-        return it->second;
-    }
-
-    DefaultHandler _defaultHandler;
-    std::unordered_map<uint64, MessageHandler> _handlers;
 
     process_t _pid;
 
@@ -674,7 +647,6 @@ private:
 
     coroutine::ForwardList _inbox_coroutines;
     coroutine::ForwardList _wakeup_coroutines;
-    coroutine::ForwardList _abort_coroutines;
     coroutine::ForwardList _unblock_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
@@ -684,16 +656,8 @@ private:
     Process *_link;
 };
 
-void HandleMessage(message::Kind kind, message::Code code, MessageHandler handler) {
-    process::Running()->HandleMessage(kind, code, std::move(handler));
-}
-
-void DefaultMessage(DefaultHandler handler) {
-    process::Running()->DefaultMessage(handler);
-}
-
-void Run() {
-    process::Running()->Run();
+void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
+    process::Running()->Loop(std::move(callback));
 }
 
 void ForwardList::Push(Process *p) {
@@ -790,12 +754,12 @@ void Kill(process_t pid) {
         Exit();
     }
     if (Process *p = Find(pid)) {
-        p->PushMessage(message::New(self, session_t(), message::Kind::System, message::Code::Kill, message::Content()));
+        p->PushMessage(message::New(self, session_t(), SystemMessage{SystemCode::kKill}));
         process::Unref(p);
     }
 }
 
-uintptr Suspend(session_t session) {
+message::Content Suspend(session_t session) {
     return Running()->Suspend(session);
 }
 
@@ -808,69 +772,36 @@ void ReleaseSession(session_t session) {
     Running()->ReleaseSession(session);
 }
 
-void
-System(process_t pid, session_t session, message::Code code, const message::Content& content) {
-    if (Process *p = Find(pid)) {
-        p->PushMessage(message::New(Pid(), session, message::Kind::System, code, content));
-        process::Unref(p);
-    }
-}
-
-void Notify(process_t pid, message::Code code, const message::Content& content) {
-    if (Process *p = Find(pid)) {
-        p->PushMessage(message::New(Pid(), session_t(0), message::Kind::Notify, code, content));
-        process::Unref(p);
-    }
-}
-
-Error
-Request(process_t pid, message::Code code, const message::Content& content, message::Content *resultp) {
+message::Content Request(process_t pid, message::Content content) {
     Process *running = Running();
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
     }
     if (Process *p = Find(pid)) {
         Session session = running->NewSession();
-        p->PushMessage(message::New(running->Pid(), session.Value(), message::Kind::Request, code, content));
+        p->PushMessage(message::New(running->Pid(), session.Value(), content));
         process::Unref(p);
-        return running->WaitResponse(session.Value(), resultp);
-    } else {
-        return Error::LocalNotExist;
+        return running->Suspend(session.Value());
     }
+    throw 5;
 }
 
-void Response(process_t source, session_t session, message::Code code, const message::Content& content) {
-    process_t self;
+void Response(process_t source, session_t session, message::Content content) {
     if (Process *running = process::Running()) {
-        self = running->Pid();
-        running->DoneRequest(source, session);
-    }
-    if (Process *p = Find(source)) {
-        p->PushMessage(message::New(self, session, message::Kind::Response, code, content));
+        running->Response(source, session, std::move(content));
+    } else if (Process *p = Find(source)) {
+        p->PushMessage(message::New(process_t(), sessionForResponse(session), std::move(content)));
         process::Unref(p);
     }
 }
 
-void Response(process_t pid, session_t session, const message::Content& content) {
-    Response(pid, session, message::Code::None, content);
+void Send(process_t pid, message::Content content) {
+    Send(pid, session_t(), std::move(content));
 }
 
-void Send(process_t pid, session_t session, message::Kind kind, message::Code code, const message::Content& content) {
-    switch (kind) {
-    case message::Kind::System:
-        System(pid, session, code, content);
-        break;
-    case message::Kind::Notify:
-        Notify(pid, code, content);
-        break;
-    case message::Kind::Request:
-        if (Process *p = Find(pid)) {
-            p->PushMessage(message::New(Pid(), session, message::Kind::Request, code, content));
-            process::Unref(p);
-        }
-        break;
-    default:
-        break;
+void Send(process_t pid, session_t session, message::Content content) {
+    if (Process *p = Find(pid)) {
+        p->PushMessage(message::New(Pid(), session, std::move(content)));
     }
 }
 
@@ -878,7 +809,7 @@ void Yield() {
     auto running = process::Running();
     assert(running != nullptr);
     Session session = running->NewSession();
-    running->PushMessage(message::New(process_t(0), session.Value(), message::Kind::Response, message::Code::None, message::Content{}));
+    running->PushMessage(message::New(process_t(0), session.Value(), message::Content{}));
     running->Suspend(session.Value());
 }
 
@@ -986,10 +917,10 @@ void Condition::notify_all() {
 namespace coroutine {
 
 void
-Wakeup(Coroutine *co, uintptr result) {
+Wakeup(Coroutine *co) {
     auto p = process::Running();
     assert(p != nullptr);
-    p->Wakeup(co, result);
+    p->Wakeup(co);
 }
 
 void Timeout(uint64 msecs, std::function<void()> func, size_t stacksize) {

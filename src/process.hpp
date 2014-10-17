@@ -71,7 +71,7 @@ process_t Spawn(Closure&& closure, size_t addstack = 0) {
     return Spawn(func, addstack);
 }
 
-uintptr Suspend(session_t);
+message::Content Suspend(session_t);
 
 void Resume(Process *p);
 
@@ -145,18 +145,6 @@ private:
 
 Session NewSession();
 
-using MessageHandler = std::function<void(process_t, session_t, message::Content const&)>;
-using DefaultHandler = std::function<void(message::Kind, message::Code, process_t, session_t, message::Content const&)>;
-
-void HandleMessage(message::Kind kind, message::Code code, MessageHandler handler);
-
-void DefaultMessage(DefaultHandler handler);
-
-void Run();
-
-// Asynchronous resume, eg. insert coroutine to run queue.
-void Wakeup(Coroutine *co, uintptr result = 0);
-
 struct Error {
     enum : uintptr {
         None                = 0,
@@ -181,23 +169,12 @@ inline bool operator!=(Error a, Error b) {
     return !(a==b);
 }
 
-void Notify(process_t pid, message::Code code, const message::Content& content = message::Content{});
+void Send(process_t pid, message::Content content);
+void Send(process_t pid, session_t session, message::Content content);
+message::Content Request(process_t pid, message::Content content);
+void Response(process_t pid, session_t session, message::Content content = {});
 
-void System(process_t pid, session_t session, message::Code code, const message::Content& content = message::Content{});
-
-Error Request(process_t pid, message::Code code, const message::Content& content, message::Content *resultp = nullptr);
-void Response(process_t pid, session_t session, message::Code code = message::Code::None, const message::Content& content = message::Content{});
-
-template<typename CodeEnum, typename std::enable_if_t<message::is_message_code_enum<CodeEnum>::value>* = nullptr>
-Error Request(process_t pid, CodeEnum code, const message::Content& content, message::Content *resultp = nullptr) {
-    return Request(pid, make_message_code(code), content, resultp);
-}
-
-// Asynchronous sending, always success.
-//
-// Error for message::Kind::Request is reported by receiving
-// (message::Kind::System, message::Code::Error).
-void Send(process_t pid, session_t session, message::Kind kind, message::Code, const message::Content& content);
+void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback);
 
 class Mutex {
 public:

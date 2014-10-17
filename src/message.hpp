@@ -16,36 +16,11 @@
 namespace stp {
 namespace message {
 
-enum class Kind : uint32 {
-    System      = 0,        // differentiate system-level and application-level message
-    Notify      = 1,
-    Request     = 2,
-    Response    = 3,
-};
-
-enum class Code : uint32 {
-    None        = 0,
-    Kill        = 1,
-    Abort       = 2,
-    Error       = 3,        // content.Data is process::Error ?
-    Wakeup      = 4,
-};
-
-template<typename T>
-struct is_message_code_enum : std::false_type {};
-
-enum class ResourceId : uint32 {
-    None            = 0,
-    NEWMEM          = 1,
-};
-
 using Content = wild::Any;
 
 struct Message {
     process_t source;
     session_t session;
-    Kind kind;
-    Code code;
     Content content;
     struct Message *link;
 };
@@ -110,11 +85,9 @@ inline void swap(ForwardList& a, ForwardList& b) {
     a.swap(b);
 }
 
-Message* New(process::process_t source, process::session_t session, message::Kind kind, message::Code code, message::Content content);
+Message* New(process::process_t source, process::session_t session, message::Content content);
 
 void Delete(Message *m);
-
-void Register(ResourceId resd, void (*freed)(uintptr data, uintptr meta));
 
 // one reader, multiple writer, nonblocking.
 // After nullptr returned from Take(), reader
