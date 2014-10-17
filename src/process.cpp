@@ -166,19 +166,6 @@ public:
         return v;
     }
 
-    void SetJoiner(Coroutine *joiner) {
-        _joiner = joiner;
-    }
-
-    Coroutine *Joiner() {
-        return _joiner;
-    }
-
-    void Detach() {
-        assert(_joiner == nullptr);
-        _joiner = reinterpret_cast<Coroutine*>(1);
-    }
-
     // TODO allocate from thread local coroutine pool.
     static Coroutine *New(std::function<void()> func, size_t stacksize) {
         return new Coroutine(std::move(func), stacksize);
@@ -196,8 +183,7 @@ public:
 private:
 
     Coroutine(std::function<void()> func, size_t stacksize)
-        : _joiner(nullptr)
-        , _result(0)
+        : _result(0)
         , _context(nullptr)
         , _function(std::move(func)) {
 #define CoroutineMain   reinterpret_cast<void(*)(void*)>(&Coroutine::Main)
@@ -218,29 +204,12 @@ private:
     void Run() {
         try {
             _function();
-            throw coroutine::ExitException();
         } catch (coroutine::ExitException&) {
-            Coroutine *joiner = _joiner;
-            switch (reinterpret_cast<uintptr>(joiner)) {
-            case 0:         // task, about to joining
-                _joiner = reinterpret_cast<Coroutine*>(2);
-                coroutine::Yield();
-            case 1:         // detached
-                break;
-            case 2:
-                abort();
-                break;
-            default:
-                coroutine::Wakeup(joiner, Result());
-                break;
-            }
         } catch (...) {
             _exception = std::current_exception();
         }
     }
 
-    // 0, task wait to join; 1, detached task; 2, result is ok; other, joiner task.
-    Coroutine *_joiner;
     uintptr _result;
     std::exception_ptr _exception;
     context::Context *_context;
@@ -290,28 +259,21 @@ void Die(Coroutine *co) {
     context::Switch(co->Context(), coroutine::ThreadContext());
 }
 
-Coroutine *Task(std::function<void()> func, size_t stacksize) {
+void Spawn(std::function<void()> func, size_t stacksize) {
     if (UNLIKELY(process::Running() == nullptr)) {
         throw std::runtime_error("try to spawn coroutine in no stp process");
     }
     auto co = Coroutine::New(std::move(func), stacksize);
     coroutine::Wakeup(co);
-    return co;
-}
-
-void Spawn(std::function<void()> func, size_t stacksize) {
-    Coroutine *co = Task(std::move(func), stacksize);
-    co->Detach();
 }
 
 void Sleep(uint64 msecs) {
     timer::Sleep(msecs);
 }
 
-void Exit(uintptr result) {
+void Exit() {
     Coroutine *running = Running();
     assert(running != nullptr);
-    running->SetResult(result);
     throw coroutine::ExitException();
 }
 
@@ -325,29 +287,6 @@ wild::uintptr Yield() {
 
 void Resume(Coroutine *co) {
     co->Resume();
-}
-
-uintptr Join(Coroutine *co) {
-    Coroutine *running = Running();
-    Coroutine *joiner = co->Joiner();
-    assert(running != nullptr);
-    switch (reinterpret_cast<uintptr>(joiner)) {
-    case 0:
-        co->SetJoiner(running);
-        // After return from Yield(), co is invalid,
-        // due to asynchronous wake up.
-        return coroutine::Yield();
-    case 1:
-        throw std::invalid_argument("try to join detached coroutine");
-    case 2: {
-        SCOPE_EXIT {
-            coroutine::Wakeup(co);
-        };
-        return co->FetchResult();
-    }
-    default:
-        throw std::runtime_error("duplicating joiner");
-    }
 }
 
 void Mutex::lock() {
