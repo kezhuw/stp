@@ -66,23 +66,7 @@ namespace message { struct Message; }
 
 namespace stp {
 
-using uint = wild::uint;
-
-using int32 = wild::int32;
-using uint32 = wild::uint32;
-
-using int64 = wild::int64;
-using uint64 = wild::uint64;
-
-using intptr = wild::intptr;
-using uintptr = wild::uintptr;
-
-using byte_t = wild::byte_t;
-using size_t = wild::size_t;
-using string = wild::string;
-
-using func_t = wild::func_t;
-using pointer_t = wild::pointer_t;
+using namespace wild::types;
 
 using process_t = process::process_t;
 using session_t = process::session_t;
