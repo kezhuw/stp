@@ -20,7 +20,7 @@ main() {
     process::Spawn([] {
         wild::Fd listener;
         std::error_condition error;
-        std::tie(listener, error) = net::tcp::Listen("tcp://*:3000");
+        std::tie(listener, error) = net::tcp::Listen("tcp4://*:3000");
         if (error) {
             printf("fail to listen: %s\n", error.message().c_str());
             process::Exit();
