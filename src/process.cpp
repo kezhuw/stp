@@ -329,6 +329,9 @@ void Condition::wait(Mutex& locker) {
         locker.unlock();
         _blocks.Push(running);
     }
+    SCOPE_EXIT {
+        locker.lock();
+    };
     coroutine::Yield();
 }
 
