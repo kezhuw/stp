@@ -119,7 +119,12 @@ private:
         assert(err == 0);
         (void)err;
 
-        _ucontext.uc_stack.ss_sp = _stackbase;
+#if defined(__FreeBSD__) || defined(__APPLE__)
+using stack_pointer_t = char *;
+#else
+using stack_pointer_t = void *;
+#endif
+        _ucontext.uc_stack.ss_sp = static_cast<stack_pointer_t>(_stackbase);
         _ucontext.uc_stack.ss_size = _stacksize;
         _ucontext.uc_stack.ss_flags = 0;
         _ucontext.uc_link = nullptr;
