@@ -8,7 +8,7 @@ message.cpp
 sched.cpp
 io.cpp
 timer.cpp
-fd_epoll.cpp
+fd.cpp
 )
 
 add_library(stp STATIC ${stp_SRCS})
