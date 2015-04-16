@@ -27,7 +27,7 @@ using namespace stp::fd;
 int _epoll_create() {
     int fd = ::epoll_create(1);
     if (fd == -1) {
-        throw std::system_error(errno, std::system_category(), "epoll_create(1): ");
+        throw std::system_error(errno, std::system_category(), "epoll_create(1)");
     }
     return fd;
 }
@@ -35,7 +35,7 @@ int _epoll_create() {
 void _epoll_ctl(int epfd, int op, int fd, struct epoll_event *event) {
     int err = epoll_ctl(epfd, op, fd, event);
     if (err != 0) {
-        throw std::system_error(errno, std::system_category(), "epoll_ctl(): ");
+        throw std::system_error(errno, std::system_category(), "epoll_ctl()");
     }
 }
 
