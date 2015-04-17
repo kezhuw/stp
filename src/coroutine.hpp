@@ -9,39 +9,12 @@
 namespace stp {
 namespace coroutine {
 
-class Coroutine;
-
 void Spawn(std::function<void()> func, size_t addstack = 0);
-
-void Wakeup(Coroutine *co);
 
 void Sleep(wild::uint64 msecs);
 void Timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
 
-Coroutine *Running();
-
 void Exit();
-
-class ForwardList {
-public:
-
-    void Push(Coroutine *);
-    Coroutine *Take();
-
-    Coroutine *Front() const;
-    bool Empty() const;
-
-    ForwardList& operator=(ForwardList&& other) {
-        _head = other._head;
-        _tail = other._tail;
-        other._head = other._tail = nullptr;
-        return *this;
-    }
-
-private:
-    Coroutine *_head = nullptr;
-    Coroutine *_tail = nullptr;
-};
 
 class Mutex {
 public:
@@ -60,7 +33,7 @@ public:
     Mutex& operator=(Mutex&&) = delete;
 
 private:
-    ForwardList _coroutines;
+    std::queue<uintptr> _coroutines;
 };
 
 class Condition {
@@ -82,7 +55,7 @@ public:
 
 private:
     Mutex _mutex;
-    ForwardList _blocks;
+    std::queue<uintptr> _blocks;
 };
 
 }

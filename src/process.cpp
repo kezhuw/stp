@@ -11,6 +11,7 @@
 #include <wild/scope_guard.hpp>
 #include <wild/forward_list.hpp>
 #include <wild/id_allocator.hpp>
+#include <wild/utility.hpp>
 
 #include <ucontext.h>
 #include <sys/mman.h>
@@ -69,7 +70,7 @@ namespace coroutine {
 
 static thread_local context::Context *tContext = context::New();
 static thread_local stp::coroutine::Coroutine *tCoroutine;
-static thread_local ForwardList tZombieQueue;
+static thread_local std::queue<Coroutine*> tZombieQueue;
 
 context::Context *
 ThreadContext() {
@@ -251,48 +252,18 @@ private:
     Result _result;
     context::Context *_context;
     std::function<void()> _function;
-
-    Coroutine *_link;
-    friend ForwardList;
 };
 
+void Wakeup(Coroutine *co);
+
 void Cleanup() {
-    while (Coroutine *co = tZombieQueue.Take()) {
+    while (auto co = wild::take(tZombieQueue, nullptr)) {
         Coroutine::Delete(co);
     }
 }
 
-void ForwardList::Push(Coroutine *co) {
-    co->_link = nullptr;
-    if (_tail == nullptr) {
-        _head = _tail = co;
-    } else {
-        _tail->_link = co;
-        _tail = co;
-    }
-}
-
-Coroutine* ForwardList::Take() {
-    Coroutine *co = _head;
-    if (co) {
-        _head = co->_link;
-        if (_head == nullptr) {
-            _tail = nullptr;
-        }
-    }
-    return co;
-}
-
-Coroutine* ForwardList::Front() const {
-    return _head;
-}
-
-bool ForwardList::Empty() const {
-    return _head == nullptr;
-}
-
 void Die(Coroutine *co) {
-    tZombieQueue.Push(co);
+    tZombieQueue.push(co);
     context::Switch(co->Context(), coroutine::ThreadContext());
 }
 
@@ -326,44 +297,47 @@ void Resume(Coroutine *co) {
 }
 
 void Mutex::lock() {
-    Coroutine *running = Running();
-    assert(running != nullptr);
-    assert(running != _coroutines.Front());
-    _coroutines.Push(running);
-    if (_coroutines.Front() != running) {
+    auto running = reinterpret_cast<uintptr>(Running());
+    assert(running != 0);
+    if (_coroutines.empty()) {
+        _coroutines.push(running);
+    } else {
+        assert(_coroutines.front() != running);
+        _coroutines.push(running);
         coroutine::Yield();
+        assert(!_coroutines.empty());
+        assert(_coroutines.front() == running);
     }
-    assert(_coroutines.Front() == running);
 }
 
 bool Mutex::try_lock() {
-    if (_coroutines.Empty()) {
-        Coroutine *running = Running();
-        assert(running != nullptr);
-        _coroutines.Push(running);
+    if (_coroutines.empty()) {
+        auto running = reinterpret_cast<uintptr>(Running());
+        assert(running != 0);
+        _coroutines.push(running);
         return true;
     }
     return false;
 }
 
 void Mutex::unlock() {
-    Coroutine *running_ = Running();
-    assert(running_ != nullptr);
-    assert(_coroutines.Front() != nullptr);
-    assert(_coroutines.Front() == running_);
-    (void)running_;
-    _coroutines.Take();
-    if (Coroutine *co = _coroutines.Front()) {
-        coroutine::Wakeup(co);
+    auto running_ = reinterpret_cast<uintptr>(Running());
+    assert(running_ != 0);
+    assert(!_coroutines.empty());
+    assert(_coroutines.front() == running_);
+    _coroutines.pop();
+    if (!_coroutines.empty()) {
+        auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
+        coroutine::Wakeup(pending);
     }
 }
 
 void Condition::wait(Mutex& locker) {
-    Coroutine *running = Running();
-    assert(running != nullptr);
+    auto running = reinterpret_cast<uintptr>(Running());
+    assert(running != 0);
     WITH_LOCK(_mutex) {
         locker.unlock();
-        _blocks.Push(running);
+        _blocks.push(running);
     }
     SCOPE_EXIT {
         locker.lock();
@@ -372,22 +346,22 @@ void Condition::wait(Mutex& locker) {
 }
 
 void Condition::notify_one() {
-    Coroutine *co;
+    Coroutine *pending;
     WITH_LOCK(_mutex) {
-        co = _blocks.Take();
+        pending = reinterpret_cast<Coroutine*>(wild::take(_blocks, 0));
     }
-    if (co) {
-        coroutine::Wakeup(co);
+    if (pending) {
+        coroutine::Wakeup(pending);
     }
 }
 
 void Condition::notify_all() {
-    ForwardList blocks;
+    std::queue<uintptr> blocks;
     WITH_LOCK(_mutex) {
         blocks = std::move(_blocks);
     }
-    while (Coroutine *co = blocks.Take()) {
-        coroutine::Wakeup(co);
+    while (auto pending = reinterpret_cast<Coroutine*>(wild::take(blocks, 0))) {
+        coroutine::Wakeup(pending);
     }
 }
 
@@ -466,19 +440,19 @@ public:
 
     void Schedule() {
         // No blocked session will be unblocked.
-        while (Coroutine *co = _unblock_coroutines.Take()) {
+        while (auto co = wild::take(_unblock_coroutines, nullptr)) {
             coroutine::Resume(co);
         }
 
         // running coroutine may:
         //   wakeup suspended coroutine;
         //   block to read maibox.
-        while ((!_wakeup_coroutines.Empty()) || (!_inbox.Empty() && !_inbox_coroutines.Empty())) {
-            while (Coroutine *co = _wakeup_coroutines.Take()) {
+        while ((!_wakeup_coroutines.empty()) || (!_inbox.Empty() && !_inbox_coroutines.empty())) {
+            while (auto co = wild::take(_wakeup_coroutines, nullptr)) {
                 coroutine::Resume(co);
             }
             while (!_inbox.Empty()) {
-                if (Coroutine *co = _inbox_coroutines.Take()) {
+                if (auto co = wild::take(_inbox_coroutines, nullptr)) {
                     coroutine::Resume(co);
                 }
             }
@@ -488,11 +462,11 @@ public:
     }
 
     bool Inactive() {
-        return _wakeup_coroutines.Empty() && _block_sessions.empty() && _inbox_coroutines.Empty();
+        return _wakeup_coroutines.empty() && _block_sessions.empty() && _inbox_coroutines.empty();
     }
 
     void Wakeup(Coroutine *co) {
-        _wakeup_coroutines.Push(co);
+        _wakeup_coroutines.push(co);
     }
 
     enum class ResumeResult : uintptr {
@@ -523,7 +497,7 @@ public:
                     } else {
                         co->SetResult(std::move(msg->content));
                     }
-                    _unblock_coroutines.Push(co);
+                    _unblock_coroutines.push(co);
                 } else {
                     printf("unknown response session[%u]\n", session);
                 }
@@ -569,7 +543,7 @@ public:
         Coroutine *co = coroutine::Running();
         assert(co != nullptr);
         while (_inbox.Empty()) {
-            _inbox_coroutines.Push(co);
+            _inbox_coroutines.push(co);
             coroutine::Yield();
         }
         return _inbox.Take();
@@ -645,9 +619,9 @@ private:
 
     wild::IdAllocator<uint32> _sessions;
 
-    coroutine::ForwardList _inbox_coroutines;
-    coroutine::ForwardList _wakeup_coroutines;
-    coroutine::ForwardList _unblock_coroutines;
+    std::queue<Coroutine*> _inbox_coroutines;
+    std::queue<Coroutine*> _wakeup_coroutines;
+    std::queue<Coroutine*> _unblock_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
     friend void Ref(Process *p);
