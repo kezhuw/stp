@@ -1,10 +1,12 @@
 #include "process.hpp"
 #include "message.hpp"
+#include "module.hpp"
 #include "context.hpp"
 #include "coroutine.hpp"
-#include "sched.hpp"
 #include "timer.hpp"
 
+#include <wild/BlockingQueue.hpp>
+#include <wild/module.hpp>
 #include <wild/types.hpp>
 #include <wild/likely.hpp>
 #include <wild/with_lock.hpp>
@@ -19,9 +21,12 @@
 #include <cstddef>
 #include <cstdlib>
 
+#include <algorithm>
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -33,6 +38,8 @@ namespace stp {
 
 using Process = process::Process;
 using Coroutine = coroutine::Coroutine;
+
+namespace sched { static void Resume(Process *); }
 
 enum class SystemCode {
     kKill,
@@ -400,18 +407,13 @@ static Process *Find(process_t pid) {
     return nullptr;
 }
 
-static inline void Schedule(Process *p) {
-    process::Ref(p);
-    sched::Schedule(p);
-}
-
 class Process {
 public:
 
     void PushMessage(message::Message *msg) {
         bool wait = _mailbox.Push(msg);
         if (wait) {
-            process::Schedule(this);
+            sched::Resume(this);
         }
     }
 
@@ -528,7 +530,7 @@ public:
 
     Session NewSession() {
         uint32 id = _sessions.NewId();
-        return Session(this, session_t(id));
+        return Session(reinterpret_cast<uintptr>(this), session_t(id));
     }
 
     void ReleaseSession(session_t session) {
@@ -626,41 +628,10 @@ private:
 
     friend void Ref(Process *p);
     friend void Unref(Process *p);
-    friend process::ForwardList;
-    Process *_link;
 };
 
 void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
     process::Running()->Loop(std::move(callback));
-}
-
-void ForwardList::Push(Process *p) {
-    p->_link = nullptr;
-    if (_tail == nullptr) {
-        _head = _tail = p;
-    } else {
-        _tail->_link = p;
-        _tail = p;
-    }
-}
-
-Process* ForwardList::Take() {
-    Process *head = _head;
-    if (head) {
-        _head = head->_link;
-        if (_head == nullptr) {
-            _tail = nullptr;
-        }
-    }
-    return head;
-}
-
-Process* ForwardList::Front() const {
-    return _head;
-}
-
-bool ForwardList::Empty() const {
-    return _head == nullptr;
 }
 
 void Ref(Process *p) {
@@ -687,21 +658,22 @@ void Retire(Process *p) {
 void Resume(Process *p) {
     switch (p->Resume()) {
     case Process::ResumeResult::Resume:
-        sched::Schedule(p);
+        sched::Resume(p);
         break;
     case Process::ResumeResult::Down:
         process::Retire(p);
-    case Process::ResumeResult::Break:
-        process::Unref(p);
+        break;
+    default:
         break;
     }
+    process::Unref(p);
 }
 
 process_t
 Spawn(std::function<void()> func, size_t stacksize) {
     auto p = Process::New(std::move(func), stacksize);
     process_t pid = p->Pid();
-    process::Schedule(p);
+    sched::Resume(p);
     return pid;
 }
 
@@ -787,12 +759,22 @@ void Yield() {
     running->Suspend(session.Value());
 }
 
+Session::Session(session_t session)
+    : Session(reinterpret_cast<uintptr>(process::Running()), session) {
+}
+
+Session::Session(uintptr process, session_t session)
+    : _process(process), _session(session) {
+}
+
 process_t Session::Pid() const {
-    return _process->Pid();
+    auto p = reinterpret_cast<Process*>(_process);
+    return p->Pid();
 }
 
 void Session::close() {
-    _process->ReleaseSession(_session);
+    auto p = reinterpret_cast<Process*>(_process);
+    p->ReleaseSession(_session);
 }
 
 void Mutex::lock() {
@@ -904,6 +886,74 @@ void Timeout(uint64 msecs, std::function<void()> func, size_t stacksize) {
     timer::Timeout(session.Value(), msecs);
     running->Suspend(co, session.Value());
 }
+
+}
+
+namespace sched {
+
+using ProcessQueue = wild::BlockingQueue<process::Process*, wild::SpinLock>;
+
+struct Worker {
+public:
+
+    Worker() {
+        _thread = std::thread(std::mem_fn(&Worker::Run), this);
+    }
+
+    void Queue(Process *p) {
+        if (p == nullptr) {
+            return;
+        }
+        _queue.push(p);
+    }
+
+private:
+
+    void Run() {
+        for (;;) {
+            auto p = _queue.take();
+            if (p == nullptr) {
+                break;
+            }
+            process::Resume(p);
+        }
+    }
+
+    ProcessQueue _queue;
+    std::thread _thread;
+};
+
+static class {
+public:
+
+    void Start(size_t n) {
+        n = std::max(size_t(2), n);
+        _n = n;
+        _workers = new Worker[n];
+    }
+
+    void Resume(Process *p) {
+        process::Ref(p);
+        uintptr randval = reinterpret_cast<uintptr>(p) + reinterpret_cast<uintptr>(&p);
+        size_t index = ((randval >> 4) + (randval >> 16))%_n;
+        _workers[index].Queue(p);
+    }
+
+private:
+    size_t _n;
+    Worker *_workers;
+} scheduler;
+
+static void Resume(Process *p) {
+    scheduler.Resume(p);
+}
+
+static void init() {
+    unsigned n = std::thread::hardware_concurrency();
+    scheduler.Start(static_cast<size_t>(n));
+}
+
+static wild::module::Definition sched(module::STP, "stp::sched", init, module::Order::Sched);
 
 }
 

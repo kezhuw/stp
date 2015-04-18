@@ -5,7 +5,6 @@ set(stp_SRCS
 process.cpp
 context.cpp
 message.cpp
-sched.cpp
 io.cpp
 timer.cpp
 fd.cpp

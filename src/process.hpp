@@ -73,12 +73,8 @@ process_t Spawn(Closure&& closure, size_t addstack = 0) {
 
 message::Content Suspend(session_t);
 
-void Resume(Process *p);
-
 // relinquish CPU
 void Yield();
-
-Process *Running();
 
 process_t Pid();
 
@@ -88,17 +84,12 @@ void Kill(process_t pid);
 class Session {
 public:
 
-    Session(session_t session)
-        : _process(process::Running()), _session(session) {
-    }
-
-    Session(Process *p, session_t session)
-        : _process(p), _session(session) {
-    }
+    Session(session_t session);
+    Session(uintptr process, session_t session);
 
     Session(Session&& other)
         : _process(other._process), _session(other._session) {
-        other._process = nullptr;
+        other._process = 0;
         other._session = session_t(0);
     }
 
@@ -119,7 +110,7 @@ public:
         }
         _process = other._process;
         _session = other._session;
-        other._process = nullptr;
+        other._process = 0;
         other._session = session_t(0);
         return *this;
     }
@@ -139,7 +130,7 @@ private:
 
     void close();
 
-    Process * _process;
+    uintptr _process;
     session_t _session;
 };
 
@@ -218,23 +209,6 @@ public:
 private:
     std::deque<std::tuple<process_t, session_t>> _blocks;
     process::Mutex _mutex;
-};
-
-// Only for scheduler.
-class ForwardList {
-public:
-
-    ForwardList() : _head(nullptr), _tail(nullptr) {}
-
-    void Push(Process *p);
-    Process *Take();
-
-    Process *Front() const;
-    bool Empty() const;
-
-private:
-    Process *_head;
-    Process *_tail;
 };
 
 }
