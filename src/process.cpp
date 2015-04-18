@@ -77,7 +77,6 @@ namespace coroutine {
 
 static thread_local context::Context *tContext = context::New();
 static thread_local stp::coroutine::Coroutine *tCoroutine;
-static thread_local std::queue<Coroutine*> tZombieQueue;
 
 context::Context *
 ThreadContext() {
@@ -263,17 +262,6 @@ private:
 
 void Wakeup(Coroutine *co);
 
-void Cleanup() {
-    while (auto co = wild::take(tZombieQueue, nullptr)) {
-        Coroutine::Delete(co);
-    }
-}
-
-void Die(Coroutine *co) {
-    tZombieQueue.push(co);
-    context::Switch(co->Context(), coroutine::ThreadContext());
-}
-
 void Spawn(std::function<void()> func, size_t addstack) {
     if (UNLIKELY(process::Running() == nullptr)) {
         throw std::runtime_error("try to spawn coroutine in no stp process");
@@ -440,6 +428,17 @@ public:
         return co;
     }
 
+    void mark_zombie(Coroutine *co) {
+        _zombie_coroutines.push_back(co);
+    }
+
+    void sweep_zombies() {
+        for (auto co : _zombie_coroutines) {
+            Coroutine::Delete(co);
+        }
+        _zombie_coroutines.clear();
+    }
+
     void Schedule() {
         // No blocked session will be unblocked.
         while (auto co = wild::take(_unblock_coroutines, nullptr)) {
@@ -460,7 +459,7 @@ public:
             }
         }
 
-        coroutine::Cleanup();
+        sweep_zombies();
     }
 
     bool Inactive() {
@@ -624,6 +623,7 @@ private:
     std::queue<Coroutine*> _inbox_coroutines;
     std::queue<Coroutine*> _wakeup_coroutines;
     std::queue<Coroutine*> _unblock_coroutines;
+    std::vector<Coroutine*> _zombie_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
     friend void Ref(Process *p);
@@ -871,6 +871,12 @@ void Condition::notify_all() {
 }
 
 namespace coroutine {
+
+void Die(Coroutine *co) {
+    auto p = process::Running();
+    p->mark_zombie(co);
+    context::Switch(co->Context(), coroutine::ThreadContext());
+}
 
 void
 Wakeup(Coroutine *co) {
