@@ -26,12 +26,13 @@ struct stacklist {
 
 const size_t gPageSize = (size_t)sysconf(_SC_PAGESIZE);
 
-void* mstack(size_t& stacksize) {
-    if (stacksize != 0) {
+std::tuple<void*, size_t> mstack(size_t addstack) {
+    if (addstack != 0) {
         size_t stackmask = gPageSize - 1;
-        stacksize = (stacksize + stackmask) & (~stackmask);
+        addstack = (addstack + stackmask) & (~stackmask);
     }
-    stacksize += 8*gPageSize;
+    size_t stacksize = 8*gPageSize + addstack;
+    assert(stacksize % gPageSize == 0);
 
     size_t index = stacksize/gPageSize;
     if (index < std::extent<decltype(gStacks)>::value) {
@@ -40,7 +41,8 @@ void* mstack(size_t& stacksize) {
             struct link *stk = sl.First;
             if (stk) {
                 sl.First = stk->_link;
-                return static_cast<void*>(stk);
+                auto stackbase = reinterpret_cast<void*>(stk);
+                return std::make_tuple(stackbase, stacksize);
             }
         }
     }
@@ -51,13 +53,14 @@ void* mstack(size_t& stacksize) {
     void *highPage = static_cast<void*>(static_cast<byte_t*>(stackbase) + stacksize);
     mprotect(lowPage, gPageSize, PROT_NONE);
     mprotect(highPage, gPageSize, PROT_NONE);
-    return stackbase;
+    return std::make_tuple(stackbase, stacksize);
 }
 
 void munstack(void *stackbase, size_t stacksize) {
+    assert(stacksize % gPageSize == 0);
     size_t index = stacksize/gPageSize;
     if (index < std::extent<decltype(gStacks)>::value) {
-        struct link *stk = static_cast<struct link *>(stackbase);
+        struct link *stk = reinterpret_cast<struct link *>(stackbase);
         struct stacklist& sl = gStacks[index];
         WITH_LOCK(sl.Mutex) {
             stk->_link = sl.First;
@@ -88,12 +91,12 @@ public:
         return new Context();
     }
 
-    static Context *New(size_t stacksize, void (*func)(void*), void *arg) {
+    static Context *New(void (*func)(void*), void *arg, size_t addstack) {
         if (auto ctx = allocContext()) {
-            new (ctx) Context(stacksize, func, arg);
+            new (ctx) Context(func, arg, addstack);
             return ctx;
         }
-        return new Context(stacksize, func, arg);
+        return new Context(func, arg, addstack);
     }
 
     static void Delete(Context *ctx) {
@@ -111,9 +114,8 @@ private:
         : _stackbase(nullptr)
         , _stacksize(0) {}
 
-    Context(size_t stacksize, void (*func)(void *), void *arg) {
-        _stackbase = mstack(stacksize);
-        _stacksize = stacksize;
+    Context(void (*func)(void *), void *arg, size_t addstack) {
+        std::tie(_stackbase, _stacksize) = mstack(addstack);
 
         int err = getcontext(&_ucontext);
         assert(err == 0);
@@ -176,8 +178,8 @@ Context* New() {
     return Context::New();
 }
 
-Context* New(size_t stacksize, void (*func)(void *), void *arg) {
-    return Context::New(stacksize, func, arg);
+Context* New(void (*func)(void *), void *arg, size_t addstack) {
+    return Context::New(func, arg, addstack);
 }
 
 void Switch(Context *current, Context *to) {

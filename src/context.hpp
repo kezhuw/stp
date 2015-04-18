@@ -9,7 +9,7 @@ class Context;
 
 Context* New();
 
-Context* New(size_t stacksize, void (*func)(void *), void *arg);
+Context* New(void (*func)(void *), void *arg, size_t stacksize = 0);
 
 void Switch(Context *current, Context *to);
 

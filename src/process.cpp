@@ -214,8 +214,8 @@ public:
     }
 
     // TODO allocate from thread local coroutine pool.
-    static Coroutine *New(std::function<void()> func, size_t stacksize) {
-        return new Coroutine(std::move(func), stacksize);
+    static Coroutine *New(std::function<void()> func, size_t addstack) {
+        return new Coroutine(std::move(func), addstack);
     }
 
     static void Delete(Coroutine *co) {
@@ -229,11 +229,11 @@ public:
 
 private:
 
-    Coroutine(std::function<void()> func, size_t stacksize)
+    Coroutine(std::function<void()> func, size_t addstack)
         : _context(nullptr)
         , _function(std::move(func)) {
 #define CoroutineMain   reinterpret_cast<void(*)(void*)>(&Coroutine::Main)
-        _context = context::New(stacksize, CoroutineMain, static_cast<void*>(this));
+        _context = context::New(CoroutineMain, static_cast<void*>(this), addstack);
     }
 
     ~Coroutine() {
@@ -274,11 +274,11 @@ void Die(Coroutine *co) {
     context::Switch(co->Context(), coroutine::ThreadContext());
 }
 
-void Spawn(std::function<void()> func, size_t stacksize) {
+void Spawn(std::function<void()> func, size_t addstack) {
     if (UNLIKELY(process::Running() == nullptr)) {
         throw std::runtime_error("try to spawn coroutine in no stp process");
     }
-    auto co = Coroutine::New(std::move(func), stacksize);
+    auto co = Coroutine::New(std::move(func), addstack);
     coroutine::Wakeup(co);
 }
 
@@ -561,11 +561,11 @@ public:
         }
     }
 
-    static Process *New(std::function<void()> func, size_t stacksize) {
+    static Process *New(std::function<void()> func, size_t addstack) {
         auto p = new Process();
         p->_pid = Register(p);
         process::NestedScope enter(p);
-        coroutine::Spawn(std::move(func), stacksize);
+        coroutine::Spawn(std::move(func), addstack);
         return p;
     }
 
@@ -670,8 +670,8 @@ void Resume(Process *p) {
 }
 
 process_t
-Spawn(std::function<void()> func, size_t stacksize) {
-    auto p = Process::New(std::move(func), stacksize);
+Spawn(std::function<void()> func, size_t addstack) {
+    auto p = Process::New(std::move(func), addstack);
     process_t pid = p->Pid();
     sched::Resume(p);
     return pid;
@@ -879,8 +879,8 @@ Wakeup(Coroutine *co) {
     p->Wakeup(co);
 }
 
-void Timeout(uint64 msecs, std::function<void()> func, size_t stacksize) {
-    auto co = Coroutine::New(std::move(func), stacksize);
+void Timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
+    auto co = Coroutine::New(std::move(func), addstack);
     Process *running = process::Running();
     process::Session session = running->NewSession();
     timer::Timeout(session.Value(), msecs);
