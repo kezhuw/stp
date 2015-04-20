@@ -47,7 +47,7 @@ namespace message {
 
 Message *New(process_t source, session_t session, message::Content content) {
     auto m = allocMessage();
-    return new (m) Message{source, session, content, nullptr};
+    return new (m) Message{source, session, content};
 }
 
 void Delete(Message *msg) {

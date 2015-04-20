@@ -399,7 +399,7 @@ class Process {
 public:
 
     void PushMessage(message::Message *msg) {
-        bool wait = _mailbox.Push(msg);
+        bool wait = _mailbox.push(msg);
         if (wait) {
             sched::Resume(this);
         }
@@ -448,11 +448,11 @@ public:
         // running coroutine may:
         //   wakeup suspended coroutine;
         //   block to read maibox.
-        while ((!_wakeup_coroutines.empty()) || (!_inbox.Empty() && !_inbox_coroutines.empty())) {
+        while ((!_wakeup_coroutines.empty()) || (!_inbox.empty() && !_inbox_coroutines.empty())) {
             while (auto co = wild::take(_wakeup_coroutines, nullptr)) {
                 coroutine::Resume(co);
             }
-            while (!_inbox.Empty()) {
+            while (!_inbox.empty()) {
                 if (auto co = wild::take(_inbox_coroutines, nullptr)) {
                     coroutine::Resume(co);
                 }
@@ -482,13 +482,13 @@ public:
         if (Inactive()) {
             return ResumeResult::Down;
         }
-        auto msg = _mailbox.Take();
+        auto msg = _mailbox.take();
         if (msg != nullptr) {
             MessageType msgType = typeOfMessage(msg);
             switch (msgType) {
             case MessageType::kRequest:
                 ServeRequest(msg->source, msg->session);
-                _inbox.Push(msg);
+                _inbox.push(msg);
                 break;
             case MessageType::kResponse: {
                 uint32 session = -msg->session.Value();
@@ -508,7 +508,7 @@ public:
                 if (msg->content.type() == typeid(SystemMessage)) {
                     break;
                 }
-                _inbox.Push(msg);
+                _inbox.push(msg);
                 break;
             }
             // Schedule();
@@ -543,11 +543,11 @@ public:
     message::Message *nextMessage() {
         Coroutine *co = coroutine::Running();
         assert(co != nullptr);
-        while (_inbox.Empty()) {
+        while (_inbox.empty()) {
             _inbox_coroutines.push(co);
             coroutine::Yield();
         }
-        return _inbox.Take();
+        return wild::take(_inbox);
     }
 
     void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
@@ -597,13 +597,13 @@ private:
         for (auto request : _requestsMap) {
             AbortRequest(std::get<process_t>(request), std::get<session_t>(request));
         }
-        while (Message *msg = _inbox.Take()) {
+        while (Message *msg = wild::take(_inbox, nullptr)) {
             if (typeOfMessage(msg) == MessageType::kRequest) {
                 AbortRequest(msg->source, msg->session);
             }
             message::Delete(msg);
         }
-        while (Message *msg = _mailbox.Take()) {
+        while (Message *msg = _mailbox.take()) {
             if (typeOfMessage(msg) == MessageType::kRequest) {
                 AbortRequest(msg->source, msg->session);
             }
@@ -616,7 +616,7 @@ private:
     std::atomic<intptr> _refcnt;
 
     message::Mailbox _mailbox;
-    message::ForwardList _inbox;
+    std::queue<message::Message*> _inbox;
 
     wild::IdAllocator<uint32> _sessions;
 
