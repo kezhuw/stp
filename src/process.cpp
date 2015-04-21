@@ -138,20 +138,6 @@ public:
     }
 };
 
-class NestedScope {
-public:
-    NestedScope(Process *p)
-        : _origin(process::Running()) {
-        SetRunning(p);
-    }
-    ~NestedScope() {
-        SetRunning(_origin);
-    }
-
-private:
-    Process *_origin;
-};
-
 struct ExitException {
 };
 
@@ -261,14 +247,6 @@ private:
 };
 
 void Wakeup(Coroutine *co);
-
-void Spawn(std::function<void()> func, size_t addstack) {
-    if (UNLIKELY(process::Running() == nullptr)) {
-        throw std::runtime_error("try to spawn coroutine in no stp process");
-    }
-    auto co = Coroutine::New(std::move(func), addstack);
-    coroutine::Wakeup(co);
-}
 
 void Sleep(uint64 msecs) {
     timer::Sleep(msecs);
@@ -449,9 +427,15 @@ public:
         }
 
         // running coroutine may:
+        //   spawn new coroutine;
         //   wakeup suspended coroutine;
         //   block to read maibox.
-        while ((!_wakeup_coroutines.empty()) || (!_inbox.empty() && !_inbox_coroutines.empty())) {
+        while (!_spawn_coroutines.empty()
+            || !_wakeup_coroutines.empty()
+            || (!_inbox.empty() && !_inbox_coroutines.empty())) {
+            while (!_spawn_coroutines.empty()) {
+                coroutine::Resume(wild::take(_spawn_coroutines));
+            }
             while (!_wakeup_coroutines.empty()) {
                 coroutine::Resume(wild::take(_wakeup_coroutines));
             }
@@ -464,7 +448,7 @@ public:
     }
 
     bool Inactive() {
-        return _wakeup_coroutines.empty() && _block_sessions.empty() && _inbox_coroutines.empty();
+        return _spawn_coroutines.empty() && _wakeup_coroutines.empty() && _block_sessions.empty() && _inbox_coroutines.empty();
     }
 
     void Wakeup(Coroutine *co) {
@@ -561,11 +545,15 @@ public:
         }
     }
 
+    void Spawn(std::function<void()> func, size_t addstack) {
+        auto co = Coroutine::New(std::move(func), addstack);
+        _spawn_coroutines.push(co);
+    }
+
     static Process *New(std::function<void()> func, size_t addstack) {
         auto p = new Process();
         p->_pid = Register(p);
-        process::NestedScope enter(p);
-        coroutine::Spawn(std::move(func), addstack);
+        p->Spawn(std::move(func), addstack);
         return p;
     }
 
@@ -623,6 +611,7 @@ private:
     wild::IdAllocator<uint32> _sessions;
 
     std::queue<Coroutine*> _inbox_coroutines;
+    std::queue<Coroutine*> _spawn_coroutines;
     std::queue<Coroutine*> _wakeup_coroutines;
     std::queue<Coroutine*> _unblock_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
@@ -878,6 +867,12 @@ void Die(Coroutine *co) {
     auto p = process::Running();
     p->mark_zombie(co);
     context::Switch(co->Context(), coroutine::ThreadContext());
+}
+
+void Spawn(std::function<void()> func, size_t addstack) {
+    auto p = process::Running();
+    assert(p == nullptr);
+    p->Spawn(std::move(func), addstack);
 }
 
 void
