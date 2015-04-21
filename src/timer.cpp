@@ -86,12 +86,12 @@ struct Timer {
     uint64 time = 0;
     struct timer_list least[TIME_LEAST_VALUE];
     struct timer_list level[TIME_LEVEL_COUNT][TIME_LEVEL_VALUE-1];
-    wild::FreeListT<timer_node> frees;
+    wild::FreeList<timer_node> frees;
 };
 
 inline struct timer_node *
 _new_node(struct Timer *t) {
-    if (auto node = t->frees.Take()) {
+    if (auto node = t->frees.take()) {
         return node;
     }
     return new timer_node;
@@ -99,7 +99,7 @@ _new_node(struct Timer *t) {
 
 inline void
 _free_node(struct Timer *t, struct timer_node *node) {
-    t->frees.Free(node);
+    t->frees.push(node);
 }
 
 inline void

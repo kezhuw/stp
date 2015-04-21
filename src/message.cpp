@@ -11,16 +11,16 @@ namespace {
 using namespace stp;
 
 wild::SpinLock gMutex;
-wild::FreeListT<Message> gFreeList;
+wild::FreeList<Message> gFreeList;
 
-thread_local wild::FreeListST<Message> tFreeList;
+thread_local wild::FreeList<Message> tFreeList;
 
 Message *
 allocMessage() {
-    auto m = tFreeList.Take();
+    auto m = tFreeList.take();
     if (m == nullptr) {
         WITH_LOCK(gMutex) {
-            m = gFreeList.Take();
+            m = gFreeList.take();
         }
         if (m == nullptr) {
             m = static_cast<Message*>(malloc(sizeof(Message)));
@@ -31,13 +31,13 @@ allocMessage() {
 
 void
 deallocMessage(Message *m) {
-    if (tFreeList.Size() >= 10000) {
+    if (tFreeList.size() >= 10000) {
         WITH_LOCK(gMutex) {
-            gFreeList.Free(m);
+            gFreeList.push(m);
         }
         return;
     }
-    tFreeList.Free(m);
+    tFreeList.push(m);
 }
 
 }

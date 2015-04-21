@@ -145,34 +145,34 @@ using stack_pointer_t = void *;
     ucontext_t _ucontext;
 
     static wild::SpinLock gMutex;
-    static wild::FreeListT<Context> gFrees;
+    static wild::FreeList<Context> gFrees;
 
-    static thread_local wild::FreeListST<Context> tFrees;
+    static thread_local wild::FreeList<Context> tFrees;
 
     static Context *allocContext() {
-        if (auto ctx = tFrees.Take()) {
+        if (auto ctx = tFrees.take()) {
             return ctx;
         }
         WITH_LOCK(gMutex) {
-            return gFrees.Take();
+            return gFrees.take();
         }
     }
 
     static void deallocContext(Context *ctx) {
-        if (tFrees.Size() >= 5000) {
+        if (tFrees.size() >= 5000) {
             WITH_LOCK(gMutex) {
-                gFrees.Free(ctx);
+                gFrees.push(ctx);
             }
             return;
         }
-        tFrees.Free(ctx);
+        tFrees.push(ctx);
     }
 };
 
 wild::SpinLock Context::gMutex;
-wild::FreeListT<Context> Context::gFrees;
+wild::FreeList<Context> Context::gFrees;
 
-thread_local wild::FreeListST<Context> Context::tFrees;
+thread_local wild::FreeList<Context> Context::tFrees;
 
 Context* New() {
     return Context::New();
