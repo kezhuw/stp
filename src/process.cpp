@@ -341,9 +341,11 @@ void Condition::wait(Mutex& locker) {
 }
 
 void Condition::notify_one() {
-    Coroutine *pending;
+    Coroutine *pending = nullptr;
     WITH_LOCK(_mutex) {
-        pending = reinterpret_cast<Coroutine*>(wild::take(_blocks, 0));
+        if (!_blocks.empty()) {
+            pending = reinterpret_cast<Coroutine*>(wild::take(_blocks));
+        }
     }
     if (pending) {
         coroutine::Wakeup(pending);
@@ -355,7 +357,8 @@ void Condition::notify_all() {
     WITH_LOCK(_mutex) {
         blocks = std::move(_blocks);
     }
-    while (auto pending = reinterpret_cast<Coroutine*>(wild::take(blocks, 0))) {
+    while (!blocks.empty()) {
+        auto pending = reinterpret_cast<Coroutine*>(wild::take(blocks));
         coroutine::Wakeup(pending);
     }
 }
@@ -441,21 +444,19 @@ public:
 
     void Schedule() {
         // No blocked session will be unblocked.
-        while (auto co = wild::take(_unblock_coroutines, nullptr)) {
-            coroutine::Resume(co);
+        while (!_unblock_coroutines.empty()) {
+            coroutine::Resume(wild::take(_unblock_coroutines));
         }
 
         // running coroutine may:
         //   wakeup suspended coroutine;
         //   block to read maibox.
         while ((!_wakeup_coroutines.empty()) || (!_inbox.empty() && !_inbox_coroutines.empty())) {
-            while (auto co = wild::take(_wakeup_coroutines, nullptr)) {
-                coroutine::Resume(co);
+            while (!_wakeup_coroutines.empty()) {
+                coroutine::Resume(wild::take(_wakeup_coroutines));
             }
-            while (!_inbox.empty()) {
-                if (auto co = wild::take(_inbox_coroutines, nullptr)) {
-                    coroutine::Resume(co);
-                }
+            while (!_inbox.empty() && !_inbox_coroutines.empty()) {
+                coroutine::Resume(wild::take(_inbox_coroutines));
             }
         }
 
@@ -597,7 +598,8 @@ private:
         for (auto request : _requestsMap) {
             AbortRequest(std::get<process_t>(request), std::get<session_t>(request));
         }
-        while (Message *msg = wild::take(_inbox, nullptr)) {
+        while (!_inbox.empty()) {
+            Message *msg = wild::take(_inbox);
             if (typeOfMessage(msg) == MessageType::kRequest) {
                 AbortRequest(msg->source, msg->session);
             }
