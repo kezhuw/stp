@@ -95,7 +95,7 @@ SetRunning(Coroutine *co) {
 
 void Die(Coroutine *co);
 
-void Yield();
+message::Content Suspend();
 
 class Scope {
 public:
@@ -280,11 +280,12 @@ void Exit() {
     throw coroutine::ExitException();
 }
 
-void Yield() {
+message::Content Suspend() {
     Coroutine *running = Running();
     assert(running != nullptr);
     context::Switch(running->Context(), coroutine::ThreadContext());
     assert(running == Running());
+    return running->GetResult();
 }
 
 void Resume(Coroutine *co) {
@@ -299,7 +300,7 @@ void Mutex::lock() {
     } else {
         assert(_coroutines.front() != running);
         _coroutines.push(running);
-        coroutine::Yield();
+        coroutine::Suspend();
         assert(!_coroutines.empty());
         assert(_coroutines.front() == running);
     }
@@ -337,7 +338,7 @@ void Condition::wait(Mutex& locker) {
     SCOPE_EXIT {
         locker.lock();
     };
-    coroutine::Yield();
+    coroutine::Suspend();
 }
 
 void Condition::notify_one() {
@@ -413,8 +414,7 @@ public:
     message::Content Suspend(session_t session) {
         Coroutine *running = coroutine::Running();
         _block_sessions[session] = running;
-        coroutine::Yield();
-        return running->GetResult();
+        return coroutine::Suspend();
     }
 
     void Suspend(Coroutine *co, session_t session) {
@@ -546,7 +546,7 @@ public:
         assert(co != nullptr);
         while (_inbox.empty()) {
             _inbox_coroutines.push(co);
-            coroutine::Yield();
+            coroutine::Suspend();
         }
         return wild::take(_inbox);
     }
