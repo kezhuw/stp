@@ -4,40 +4,42 @@
 
 namespace stp {
 
+using namespace wild::types;
+
 namespace process {
 
 class Process;
 
 struct process_t {
-    constexpr explicit process_t(wild::uint32 value = 0)
+    constexpr explicit process_t(uint32 value = 0)
         : _value(value) {}
 
     explicit operator bool() const {
         return _value != 0;
     }
 
-    wild::uint32 Value() const {
+    uint32 Value() const {
         return _value;
     }
 
 private:
-    wild::uint32 _value;
+    uint32 _value;
 };
 
 struct session_t {
-    constexpr explicit session_t(wild::uint32 value = 0)
+    constexpr explicit session_t(uint32 value = 0)
         : _value(value) {}
 
     explicit operator bool() const {
         return _value != 0;
     }
 
-    wild::uint32 Value() const {
+    uint32 Value() const {
         return _value;
     }
 
 private:
-    wild::uint32 _value;
+    uint32 _value;
 };
 
 inline bool operator==(process_t const& a, process_t const& b) {
@@ -61,12 +63,6 @@ inline bool operator!=(session_t const& a, session_t const& b) {
 namespace coroutine { class Coroutine; }
 
 namespace message { struct Message; }
-
-}
-
-namespace stp {
-
-using namespace wild::types;
 
 using process_t = process::process_t;
 using session_t = process::session_t;

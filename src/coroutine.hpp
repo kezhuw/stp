@@ -10,9 +10,9 @@ namespace stp {
 namespace coroutine {
 
 void Spawn(std::function<void()> func, size_t addstack = 0);
-
-void Sleep(wild::uint64 msecs);
 void Timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
+
+void Sleep(uint64 msecs);
 
 void Exit();
 
