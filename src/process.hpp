@@ -167,49 +167,5 @@ void Response(process_t pid, session_t session, message::Content content = {});
 
 void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback);
 
-class Mutex {
-public:
-
-    Mutex() = default;
-
-    void lock();
-    void unlock();
-
-    bool try_lock();
-
-    Mutex(const Mutex&) = delete;
-    Mutex& operator=(const Mutex&) = delete;
-
-    Mutex(Mutex&&) = delete;
-    Mutex& operator=(Mutex&&) = delete;
-
-private:
-    wild::SpinLock _mutex;
-    Coroutine *_owner = nullptr;
-    std::queue<std::tuple<process_t, session_t>> _blocks;
-};
-
-class Condition {
-public:
-
-    Condition() = default;
-    ~Condition() = default;
-
-    Condition(const Condition&) = delete;
-    Condition& operator=(const Condition&) = delete;
-
-    Condition(Condition&&) = delete;
-    Condition& operator=(Condition&&) = delete;
-
-    void wait(Mutex& locker);
-
-    void notify_one();
-    void notify_all();
-
-private:
-    std::deque<std::tuple<process_t, session_t>> _blocks;
-    process::Mutex _mutex;
-};
-
 }
 }
