@@ -49,6 +49,7 @@ public:
     Condition& operator=(Condition&&) = delete;
 
     void wait(Mutex& locker);
+    void wait(Mutex& locker, std::function<bool()> pred);
 
     void notify_one();
     void notify_all();

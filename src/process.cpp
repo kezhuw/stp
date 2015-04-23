@@ -319,6 +319,12 @@ void Condition::wait(Mutex& locker) {
     coroutine::Suspend();
 }
 
+void Condition::wait(Mutex& locker, std::function<bool()> pred) {
+    while (!pred()) {
+        wait(locker);
+    }
+}
+
 void Condition::notify_one() {
     Coroutine *pending = nullptr;
     WITH_LOCK(_mutex) {
