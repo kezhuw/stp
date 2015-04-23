@@ -6,6 +6,7 @@
 #include "timer.hpp"
 
 #include <wild/BlockingQueue.hpp>
+#include <wild/exception.hpp>
 #include <wild/module.hpp>
 #include <wild/types.hpp>
 #include <wild/likely.hpp>
@@ -24,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <stdexcept>
 #include <thread>
@@ -32,7 +34,6 @@
 #include <unordered_set>
 
 #include <unistd.h>
-
 
 namespace stp {
 
@@ -108,7 +109,10 @@ public:
     }
 };
 
-struct ExitException {
+struct ExitException : public std::exception {
+    virtual const char *what() const noexcept final override {
+        return "coroutine::ExitException";
+    }
 };
 
 }
@@ -138,15 +142,24 @@ public:
     }
 };
 
-struct ExitException {
+struct ExitException : public std::exception {
+    virtual const char *what() const noexcept final override {
+        return "process::ExitException";
+    }
 };
 
-struct AbortException {
+struct AbortException : public std::exception {
+    virtual const char *what() const noexcept final override {
+        return "process::AbortException";
+    }
 };
 
-struct KillException {
+struct KillException : public std::exception {
     KillException(process_t killer) : Killer(killer) {}
     const process_t Killer;
+    virtual const char *what() const noexcept final override {
+        return "process::KillException";
+    }
 };
 
 void Ref(Process *);
@@ -278,9 +291,14 @@ void Mutex::lock() {
     } else {
         assert(_coroutines.front() != running);
         _coroutines.push(running);
-        coroutine::Suspend();
-        assert(!_coroutines.empty());
-        assert(_coroutines.front() == running);
+        try {
+            coroutine::Suspend();
+            assert(!_coroutines.empty());
+            assert(_coroutines.front() == running);
+        } catch (...) {
+            wild::print_exception(std::current_exception());
+            std::terminate();
+        }
     }
 }
 
@@ -313,10 +331,13 @@ void Condition::wait(Mutex& locker) {
         locker.unlock();
         _blocks.push(running);
     }
-    SCOPE_EXIT {
+    try {
+        coroutine::Suspend();
         locker.lock();
-    };
-    coroutine::Suspend();
+    } catch (...) {
+        wild::print_exception(std::current_exception());
+        std::terminate();
+    }
 }
 
 void Condition::wait(Mutex& locker, std::function<bool()> pred) {
