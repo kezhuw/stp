@@ -262,11 +262,6 @@ Sleep(uint64 msecs) {
     process::Request(TIMER_SERVICE, TimeoutMessage{msecs});
 }
 
-void
-Timeout(session_t session, uint64 msecs) {
-    process::Send(TIMER_SERVICE, session, TimeoutMessage{msecs});
-}
-
 uint64
 UpdateTime() {
     uint64 now = _gettime();

@@ -401,10 +401,6 @@ public:
         return coroutine::Suspend();
     }
 
-    void Suspend(Coroutine *co, session_t session) {
-        _block_sessions[session] = co;
-    }
-
     Coroutine *unblock(session_t session) {
         auto it = _block_sessions.find(session);
         if (it == _block_sessions.end()) {
@@ -790,19 +786,18 @@ void Spawn(std::function<void()> func, size_t addstack) {
     p->Spawn(std::move(func), addstack);
 }
 
+void Timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
+    Spawn([msecs, func = std::move(func)] {
+        Sleep(msecs);
+        func();
+    }, addstack);
+}
+
 void
 Wakeup(Coroutine *co) {
     auto p = process::Running();
     assert(p != nullptr);
     p->Wakeup(co);
-}
-
-void Timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
-    auto co = Coroutine::New(std::move(func), addstack);
-    Process *running = process::Running();
-    process::Session session = running->NewSession();
-    timer::Timeout(session.Value(), msecs);
-    running->Suspend(co, session.Value());
 }
 
 }

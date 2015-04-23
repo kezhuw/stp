@@ -9,8 +9,6 @@ namespace timer {
 
 void Sleep(uint64 msecs);
 
-void Timeout(session_t session, uint64 msecs);
-
 // zero-based monotonic time from startup.
 uint64 Time();
 
