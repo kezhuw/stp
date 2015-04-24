@@ -55,7 +55,7 @@ public:
     void notify_all();
 
 private:
-    std::queue<uintptr> _blocks;
+    std::queue<uintptr> _coroutines;
 };
 
 }

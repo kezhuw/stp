@@ -328,7 +328,7 @@ void Condition::wait(Mutex& locker) {
     auto running = reinterpret_cast<uintptr>(Running());
     assert(running != 0);
     locker.unlock();
-    _blocks.push(running);
+    _coroutines.push(running);
     try {
         coroutine::Suspend();
         locker.lock();
@@ -345,15 +345,15 @@ void Condition::wait(Mutex& locker, std::function<bool()> pred) {
 }
 
 void Condition::notify_one() {
-    if (!_blocks.empty()) {
-        auto pending = reinterpret_cast<Coroutine*>(wild::take(_blocks));
+    if (!_coroutines.empty()) {
+        auto pending = reinterpret_cast<Coroutine*>(wild::take(_coroutines));
         coroutine::Wakeup(pending);
     }
 }
 
 void Condition::notify_all() {
-    while (!_blocks.empty()) {
-        auto pending = reinterpret_cast<Coroutine*>(wild::take(_blocks));
+    while (!_coroutines.empty()) {
+        auto pending = reinterpret_cast<Coroutine*>(wild::take(_coroutines));
         coroutine::Wakeup(pending);
     }
 }
