@@ -250,7 +250,7 @@ private:
             _function();
         } catch (coroutine::ExitException&) {
         } catch (...) {
-            _result.set_exception(std::current_exception());
+            wild::print_exception(std::current_exception());
         }
     }
 
