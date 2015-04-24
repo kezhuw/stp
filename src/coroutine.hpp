@@ -55,7 +55,6 @@ public:
     void notify_all();
 
 private:
-    Mutex _mutex;
     std::queue<uintptr> _blocks;
 };
 
