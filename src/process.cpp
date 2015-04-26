@@ -223,6 +223,7 @@ public:
     void Resume() {
         coroutine::Scope enter(this);
         context::Switch(coroutine::ThreadContext(), _context);
+        GetResult();
     }
 
 private:
@@ -248,7 +249,9 @@ private:
     void Run() {
         try {
             _function();
-        } catch (coroutine::ExitException&) {
+        } catch (const coroutine::ExitException&) {
+        } catch (const process::ExitException&) {
+            SetException(std::current_exception());
         } catch (...) {
             wild::print_exception(std::current_exception());
         }
@@ -379,6 +382,7 @@ public:
 
     void notify_one();
     void notify_all();
+    void interrupt_all(std::exception_ptr e);
 
     static Condition *create();
     static Condition *ref(Condition *m);
@@ -394,6 +398,9 @@ private:
     int64_t _refcnt;
     std::deque<Coroutine*> _coroutines;
 };
+
+void enroll(Condition *c);
+void delist(Condition *c);
 
 Condition* Condition::create() {
     auto c = new Condition;
@@ -423,6 +430,8 @@ void Condition::wait(Mutex& locker) {
     try {
         coroutine::Suspend();
         locker.lock();
+    } catch (const coroutine::ExitException&) {
+        locker.lock();
     } catch (...) {
         wild::print_exception(std::current_exception());
         std::terminate();
@@ -444,6 +453,14 @@ void Condition::notify_one() {
 
 void Condition::notify_all() {
     for (auto pending : _coroutines) {
+        coroutine::Wakeup(pending);
+    }
+    _coroutines.clear();
+}
+
+void Condition::interrupt_all(std::exception_ptr e) {
+    for (auto pending : _coroutines) {
+        pending->SetException(e);
         coroutine::Wakeup(pending);
     }
     _coroutines.clear();
@@ -592,6 +609,61 @@ public:
         _zombie_coroutines.clear();
     }
 
+    void abandon(std::deque<Coroutine*>& coroutines) {
+        _zombie_coroutines.insert(_zombie_coroutines.end(), coroutines.begin(), coroutines.end());
+        coroutines.clear();
+    }
+
+    void interrupt_inbox_coroutines(std::exception_ptr e) {
+        for (auto co : _inbox_coroutines) {
+            co->SetException(e);
+            Wakeup(co);
+        }
+        _inbox_coroutines.clear();
+    }
+
+    void interrupt_block_coroutines(std::exception_ptr e) {
+        for (auto value : _block_sessions) {
+            auto co = value.second;
+            co->SetException(e);
+            Wakeup(co);
+        }
+        _block_sessions.clear();
+    }
+
+    void interrupt_condvar_coroutines(std::exception_ptr e) {
+        for (auto c : _condvars) {
+            c->interrupt_all(std::make_exception_ptr(e));
+        }
+    }
+
+    void Exit() {
+        auto exitException = std::make_exception_ptr(coroutine::ExitException{});
+        for (;;) {
+            interrupt_inbox_coroutines(exitException);
+            interrupt_block_coroutines(exitException);
+            interrupt_condvar_coroutines(exitException);
+            if (_wakeup_coroutines.empty()) {
+                break;
+            }
+            do {
+                coroutine::Resume(wild::take_front(_wakeup_coroutines));
+            } while (!_wakeup_coroutines.empty());
+        }
+        abandon(_spawn_coroutines);
+        sweep_zombies();
+    }
+
+    bool Dispatch() {
+        try {
+            Schedule();
+        } catch (const process::ExitException&) {
+            Exit();
+            return false;
+        }
+        return !(_inbox_coroutines.empty() && _block_sessions.empty());
+    }
+
     void Schedule() {
         // running coroutine may:
         //   spawn new coroutine;
@@ -610,12 +682,7 @@ public:
                 coroutine::Resume(wild::take_front(_inbox_coroutines));
             }
         }
-
         sweep_zombies();
-    }
-
-    bool Inactive() {
-        return _spawn_coroutines.empty() && _wakeup_coroutines.empty() && _block_sessions.empty() && _inbox_coroutines.empty();
     }
 
     void Wakeup(Coroutine *co) {
@@ -630,8 +697,7 @@ public:
 
     ResumeResult Resume() {
         process::Scope enter(this);
-        Schedule();
-        if (Inactive()) {
+        if (!Dispatch()) {
             return ResumeResult::Down;
         }
         auto msg = _mailbox.take();
@@ -663,7 +729,6 @@ public:
                 _inbox.push_back(msg);
                 break;
             }
-            // Schedule();
             return ResumeResult::Resume;
         }
         return ResumeResult::Break;
@@ -743,6 +808,14 @@ public:
         delete p;
     }
 
+    void enroll(coroutine::detail::Condition *c) {
+        _condvars.insert(c);
+    }
+
+    void delist(coroutine::detail::Condition *c) {
+        _condvars.erase(c);
+    }
+
 private:
 
     Process()
@@ -782,6 +855,7 @@ private:
     std::deque<Coroutine*> _wakeup_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
+    std::unordered_set<coroutine::detail::Condition*> _condvars;
 
     friend void Ref(Process *p);
     friend void Unref(Process *p);
@@ -962,6 +1036,20 @@ Wakeup(Coroutine *co) {
     auto p = process::Running();
     assert(p != nullptr);
     p->Wakeup(co);
+}
+
+namespace detail {
+
+void enroll(Condition *c) {
+    auto p = process::Running();
+    p->enroll(c);
+}
+
+void delist(Condition *c) {
+    auto p = process::Running();
+    p->delist(c);
+}
+
 }
 
 }
