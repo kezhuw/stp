@@ -593,11 +593,6 @@ public:
     }
 
     void Schedule() {
-        // No blocked session will be unblocked.
-        while (!_unblock_coroutines.empty()) {
-            coroutine::Resume(wild::take_front(_unblock_coroutines));
-        }
-
         // running coroutine may:
         //   spawn new coroutine;
         //   wakeup suspended coroutine;
@@ -655,7 +650,7 @@ public:
                     } else {
                         co->SetResult(std::move(msg->content));
                     }
-                    _unblock_coroutines.push_back(co);
+                    Wakeup(co);
                 } else {
                     printf("unknown response session[%u]\n", session);
                 }
@@ -785,7 +780,6 @@ private:
     std::deque<Coroutine*> _inbox_coroutines;
     std::deque<Coroutine*> _spawn_coroutines;
     std::deque<Coroutine*> _wakeup_coroutines;
-    std::deque<Coroutine*> _unblock_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
