@@ -27,7 +27,6 @@
 #include <deque>
 #include <exception>
 #include <functional>
-#include <queue>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -596,7 +595,7 @@ public:
     void Schedule() {
         // No blocked session will be unblocked.
         while (!_unblock_coroutines.empty()) {
-            coroutine::Resume(wild::take(_unblock_coroutines));
+            coroutine::Resume(wild::take_front(_unblock_coroutines));
         }
 
         // running coroutine may:
@@ -607,13 +606,13 @@ public:
             || !_wakeup_coroutines.empty()
             || (!_inbox.empty() && !_inbox_coroutines.empty())) {
             while (!_spawn_coroutines.empty()) {
-                coroutine::Resume(wild::take(_spawn_coroutines));
+                coroutine::Resume(wild::take_front(_spawn_coroutines));
             }
             while (!_wakeup_coroutines.empty()) {
-                coroutine::Resume(wild::take(_wakeup_coroutines));
+                coroutine::Resume(wild::take_front(_wakeup_coroutines));
             }
             while (!_inbox.empty() && !_inbox_coroutines.empty()) {
-                coroutine::Resume(wild::take(_inbox_coroutines));
+                coroutine::Resume(wild::take_front(_inbox_coroutines));
             }
         }
 
@@ -625,7 +624,7 @@ public:
     }
 
     void Wakeup(Coroutine *co) {
-        _wakeup_coroutines.push(co);
+        _wakeup_coroutines.push_back(co);
     }
 
     enum class ResumeResult : uintptr {
@@ -646,7 +645,7 @@ public:
             switch (msgType) {
             case MessageType::kRequest:
                 ServeRequest(msg->source, msg->session);
-                _inbox.push(msg);
+                _inbox.push_back(msg);
                 break;
             case MessageType::kResponse: {
                 uint32 session = -msg->session.Value();
@@ -656,7 +655,7 @@ public:
                     } else {
                         co->SetResult(std::move(msg->content));
                     }
-                    _unblock_coroutines.push(co);
+                    _unblock_coroutines.push_back(co);
                 } else {
                     printf("unknown response session[%u]\n", session);
                 }
@@ -666,7 +665,7 @@ public:
                 if (msg->content.type() == typeid(SystemMessage)) {
                     break;
                 }
-                _inbox.push(msg);
+                _inbox.push_back(msg);
                 break;
             }
             // Schedule();
@@ -702,10 +701,10 @@ public:
         Coroutine *co = coroutine::Running();
         assert(co != nullptr);
         while (_inbox.empty()) {
-            _inbox_coroutines.push(co);
+            _inbox_coroutines.push_back(co);
             coroutine::Suspend();
         }
-        return wild::take(_inbox);
+        return wild::take_front(_inbox);
     }
 
     void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
@@ -720,7 +719,7 @@ public:
 
     void Spawn(std::function<void()> func, size_t addstack) {
         auto co = Coroutine::New(std::move(func), addstack);
-        _spawn_coroutines.push(co);
+        _spawn_coroutines.push_back(co);
     }
 
     static Process *New(std::function<void()> func, size_t addstack) {
@@ -760,7 +759,7 @@ private:
             AbortRequest(std::get<process_t>(request), std::get<session_t>(request));
         }
         while (!_inbox.empty()) {
-            Message *msg = wild::take(_inbox);
+            Message *msg = wild::take_front(_inbox);
             if (typeOfMessage(msg) == MessageType::kRequest) {
                 AbortRequest(msg->source, msg->session);
             }
@@ -779,14 +778,14 @@ private:
     std::atomic<intptr> _refcnt;
 
     message::Mailbox _mailbox;
-    std::queue<message::Message*> _inbox;
+    std::deque<message::Message*> _inbox;
 
     wild::IdAllocator<uint32> _sessions;
 
-    std::queue<Coroutine*> _inbox_coroutines;
-    std::queue<Coroutine*> _spawn_coroutines;
-    std::queue<Coroutine*> _wakeup_coroutines;
-    std::queue<Coroutine*> _unblock_coroutines;
+    std::deque<Coroutine*> _inbox_coroutines;
+    std::deque<Coroutine*> _spawn_coroutines;
+    std::deque<Coroutine*> _wakeup_coroutines;
+    std::deque<Coroutine*> _unblock_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
