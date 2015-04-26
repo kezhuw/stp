@@ -42,16 +42,7 @@ using Coroutine = coroutine::Coroutine;
 
 namespace sched { static void Resume(Process *); }
 
-enum class SystemCode {
-    kKill,
-    kAbort,
-    kError,
-};
-
-struct SystemMessage {
-    SystemCode code;
-};
-
+struct KillProcess {};
 struct AbortedRequest {};
 
 enum class MessageType {
@@ -723,9 +714,10 @@ public:
                 message::Delete(msg);
                 } break;
             case MessageType::kNotify:
-                if (msg->content.type() == typeid(SystemMessage)) {
+                if (msg->content.type() == typeid(KillProcess)) {
                     message::Delete(msg);
-                    break;
+                    Exit();
+                    return ResumeResult::Down;
                 }
                 _inbox.push_back(msg);
                 break;
@@ -928,11 +920,11 @@ void Exit() {
 
 void Kill(process_t pid) {
     process_t self = Pid();
-    if (pid == process_t(0) || pid == self) {
-        Exit();
+    if (pid == process_t(0)) {
+        pid = self;
     }
     if (Process *p = Find(pid)) {
-        p->PushMessage(message::New(self, session_t(), SystemMessage{SystemCode::kKill}));
+        p->PushMessage(message::New(self, session_t(), KillProcess{}));
         process::Unref(p);
     }
 }
