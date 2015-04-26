@@ -3,7 +3,6 @@
 #include "types.hpp"
 
 #include <mutex>
-#include <queue>
 #include <functional>
 
 namespace stp {
@@ -18,35 +17,32 @@ void Exit();
 
 class Mutex {
 public:
-
-    Mutex() = default;
+    Mutex();
+    ~Mutex();
 
     void lock();
     void unlock();
-
     bool try_lock();
 
-    Mutex(const Mutex&) = delete;
+    // capture by copying
+    Mutex(const Mutex&);
+
+private:
+
     Mutex& operator=(const Mutex&) = delete;
 
+    // there is no empty mutex.
     Mutex(Mutex&&) = delete;
     Mutex& operator=(Mutex&&) = delete;
 
-private:
-    std::queue<uintptr> _coroutines;
+    uintptr _opaque;
 };
 
 class Condition {
 public:
 
-    Condition() = default;
-    ~Condition() = default;
-
-    Condition(const Condition&) = delete;
-    Condition& operator=(const Condition&) = delete;
-
-    Condition(Condition&&) = delete;
-    Condition& operator=(Condition&&) = delete;
+    Condition();
+    ~Condition();
 
     void wait(Mutex& locker);
     void wait(Mutex& locker, std::function<bool()> pred);
@@ -54,8 +50,17 @@ public:
     void notify_one();
     void notify_all();
 
+    // allow capturing by copying
+    Condition(const Condition&);
+
 private:
-    std::queue<uintptr> _coroutines;
+
+    Condition& operator=(const Condition&) = delete;
+
+    Condition(Condition&&) = delete;
+    Condition& operator=(Condition&&) = delete;
+
+    uintptr _opaque;
 };
 
 }

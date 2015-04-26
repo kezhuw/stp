@@ -8,7 +8,6 @@
 #include <wild/forward_list.hpp>
 
 #include <memory>
-#include <queue>
 #include <system_error>
 #include <tuple>
 #include <functional>

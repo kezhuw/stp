@@ -27,6 +27,7 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <queue>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -283,14 +284,59 @@ void Resume(Coroutine *co) {
     co->Resume();
 }
 
+namespace detail {
+
+class Mutex {
+public:
+    Mutex() = default;
+    ~Mutex() = default;
+
+    void lock();
+    void unlock();
+    bool try_lock();
+
+    static Mutex* create();
+    static Mutex* ref(Mutex*);
+    static void unref(Mutex*);
+
+private:
+    Mutex(const Mutex&) = delete;
+    Mutex& operator=(const Mutex&) = delete;
+
+    Mutex(Mutex&&) = delete;
+    Mutex& operator=(Mutex&&) = delete;
+
+    int64_t _refcnt;
+    std::deque<Coroutine*> _coroutines;
+};
+
+Mutex* Mutex::create() {
+    auto m = new Mutex;
+    m->_refcnt = 1;
+    return m;
+}
+
+Mutex* Mutex::ref(Mutex* m) {
+    m->_refcnt += 1;
+    return m;
+}
+
+void Mutex::unref(Mutex* m) {
+    assert(m->_refcnt > 0);
+    m->_refcnt -= 0;
+    if (m->_refcnt == 0) {
+        delete m;
+    }
+}
+
 void Mutex::lock() {
-    auto running = reinterpret_cast<uintptr>(Running());
-    assert(running != 0);
+    auto running = Running();
+    assert(running != nullptr);
     if (_coroutines.empty()) {
-        _coroutines.push(running);
+        _coroutines.push_back(running);
     } else {
         assert(_coroutines.front() != running);
-        _coroutines.push(running);
+        _coroutines.push_back(running);
         try {
             coroutine::Suspend();
             assert(!_coroutines.empty());
@@ -304,31 +350,77 @@ void Mutex::lock() {
 
 bool Mutex::try_lock() {
     if (_coroutines.empty()) {
-        auto running = reinterpret_cast<uintptr>(Running());
-        assert(running != 0);
-        _coroutines.push(running);
+        auto running = Running();
+        assert(running != nullptr);
+        _coroutines.push_back(running);
         return true;
     }
     return false;
 }
 
 void Mutex::unlock() {
-    auto running_ = reinterpret_cast<uintptr>(Running());
-    assert(running_ != 0);
+    auto running_ = Running();
+    assert(running_ != nullptr);
     assert(!_coroutines.empty());
     assert(_coroutines.front() == running_);
-    _coroutines.pop();
+    _coroutines.pop_front();
     if (!_coroutines.empty()) {
         auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
         coroutine::Wakeup(pending);
     }
 }
 
+class Condition {
+public:
+    Condition() = default;
+    ~Condition() = default;
+
+    void wait(Mutex& locker);
+    void wait(Mutex& locker, std::function<bool()> pred);
+
+    void notify_one();
+    void notify_all();
+
+    static Condition *create();
+    static Condition *ref(Condition *m);
+    static void unref(Condition *m);
+
+private:
+    Condition(const Condition&) = delete;
+    Condition& operator=(const Condition&) = delete;
+
+    Condition(Condition&&) = delete;
+    Condition& operator=(Condition&&) = delete;
+
+    int64_t _refcnt;
+    std::deque<Coroutine*> _coroutines;
+};
+
+Condition* Condition::create() {
+    auto c = new Condition;
+    c->_refcnt = 1;
+    return c;
+}
+
+Condition* Condition::ref(Condition *c) {
+    c->_refcnt += 1;
+    return c;
+}
+
+void Condition::unref(Condition *c) {
+    assert(c->_refcnt > 0);
+    c->_refcnt -= 1;
+    if (c->_refcnt == 0) {
+        assert(c->_coroutines.empty());
+        delete c;
+    }
+}
+
 void Condition::wait(Mutex& locker) {
-    auto running = reinterpret_cast<uintptr>(Running());
-    assert(running != 0);
+    auto running = Running();
+    assert(running != nullptr);
     locker.unlock();
-    _coroutines.push(running);
+    _coroutines.push_back(running);
     try {
         coroutine::Suspend();
         locker.lock();
@@ -346,16 +438,85 @@ void Condition::wait(Mutex& locker, std::function<bool()> pred) {
 
 void Condition::notify_one() {
     if (!_coroutines.empty()) {
-        auto pending = reinterpret_cast<Coroutine*>(wild::take(_coroutines));
+        auto pending = wild::take_front(_coroutines);
         coroutine::Wakeup(pending);
     }
 }
 
 void Condition::notify_all() {
-    while (!_coroutines.empty()) {
-        auto pending = reinterpret_cast<Coroutine*>(wild::take(_coroutines));
+    for (auto pending : _coroutines) {
         coroutine::Wakeup(pending);
     }
+    _coroutines.clear();
+}
+
+}
+
+Mutex::Mutex() {
+    _opaque = reinterpret_cast<uintptr>(detail::Mutex::create());
+}
+
+Mutex::Mutex(const Mutex& other) {
+    auto m = reinterpret_cast<detail::Mutex*>(other._opaque);
+    _opaque = reinterpret_cast<uintptr>(detail::Mutex::ref(m));
+}
+
+Mutex::~Mutex() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    detail::Mutex::unref(m);
+}
+
+void Mutex::lock() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    m->lock();
+}
+
+void Mutex::unlock() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    m->unlock();
+}
+
+bool Mutex::try_lock() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    return m->try_lock();
+}
+
+Condition::Condition() {
+    _opaque = reinterpret_cast<uintptr>(detail::Condition::create());
+}
+
+Condition::Condition(const Condition& other) {
+    auto c = reinterpret_cast<detail::Condition*>(other._opaque);
+    _opaque = reinterpret_cast<uintptr>(detail::Condition::ref(c));
+}
+
+Condition::~Condition() {
+    auto c = reinterpret_cast<detail::Condition*>(_opaque);
+    detail::Condition::unref(c);
+}
+
+void Condition::wait(Mutex& locker) {
+    static_assert(sizeof(Mutex) == sizeof(uintptr), "");
+    auto p = reinterpret_cast<uintptr*>(std::addressof(locker));
+    auto m = reinterpret_cast<detail::Mutex*>(*p);
+    auto c = reinterpret_cast<detail::Condition*>(_opaque);
+    c->wait(*m);
+}
+
+void Condition::wait(Mutex& locker, std::function<bool()> pred) {
+    while (!pred()) {
+        wait(locker);
+    }
+}
+
+void Condition::notify_one() {
+    auto c = reinterpret_cast<detail::Condition*>(_opaque);
+    c->notify_one();
+}
+
+void Condition::notify_all() {
+    auto c = reinterpret_cast<detail::Condition*>(_opaque);
+    c->notify_all();
 }
 
 }
