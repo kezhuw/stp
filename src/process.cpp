@@ -681,15 +681,15 @@ public:
     }
 
     enum class ResumeResult : uintptr {
-        Resume          = 0,
-        Down            = 1,
-        Break           = 2,
+        kResume         = 0,
+        kDown           = 1,
+        kBreak          = 2,
     };
 
     ResumeResult Resume() {
         process::Scope enter(this);
         if (!Dispatch()) {
-            return ResumeResult::Down;
+            return ResumeResult::kDown;
         }
         auto msg = _mailbox.take();
         if (msg != nullptr) {
@@ -717,14 +717,14 @@ public:
                 if (msg->content.type() == typeid(KillProcess)) {
                     message::Delete(msg);
                     Exit();
-                    return ResumeResult::Down;
+                    return ResumeResult::kDown;
                 }
                 _inbox.push_back(msg);
                 break;
             }
-            return ResumeResult::Resume;
+            return ResumeResult::kResume;
         }
-        return ResumeResult::Break;
+        return ResumeResult::kBreak;
     }
 
     void Response(process_t source, session_t session, message::Content content) {
@@ -881,10 +881,10 @@ void Retire(Process *p) {
 
 void Resume(Process *p) {
     switch (p->Resume()) {
-    case Process::ResumeResult::Resume:
+    case Process::ResumeResult::kResume:
         sched::Resume(p);
         break;
-    case Process::ResumeResult::Down:
+    case Process::ResumeResult::kDown:
         process::Retire(p);
         break;
     default:
