@@ -983,7 +983,7 @@ void Yield() {
     auto running = process::Running();
     assert(running != nullptr);
     Session session = running->NewSession();
-    running->PushMessage(message::New(process_t(0), session.Value(), message::Content{}));
+    running->PushMessage(message::New(process_t(0), sessionForResponse(session.Value()), message::Content{}));
     running->Suspend(session.Value());
 }
 
