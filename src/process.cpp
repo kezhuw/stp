@@ -724,6 +724,7 @@ public:
                 } break;
             case MessageType::kNotify:
                 if (msg->content.type() == typeid(SystemMessage)) {
+                    message::Delete(msg);
                     break;
                 }
                 _inbox.push_back(msg);
