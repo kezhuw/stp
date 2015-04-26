@@ -139,9 +139,9 @@ struct ExitException : public std::exception {
     }
 };
 
-struct AbortException : public std::exception {
+struct RequestAborted : public std::exception {
     virtual const char *what() const noexcept final override {
-        return "process::AbortException";
+        return "process::RequestAborted";
     }
 };
 
@@ -703,7 +703,7 @@ public:
                 uint32 session = -msg->session.Value();
                 if (Coroutine *co = unblock(session_t(session))) {
                     if (msg->content.type() == typeid(AbortedRequest)) {
-                        co->SetException(std::make_exception_ptr(AbortException{}));
+                        co->SetException(std::make_exception_ptr(RequestAborted{}));
                     } else {
                         co->SetResult(std::move(msg->content));
                     }
