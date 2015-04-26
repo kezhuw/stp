@@ -731,6 +731,12 @@ public:
         return ResumeResult::kBreak;
     }
 
+    void Yield() {
+        Session session = NewSession();
+        PushMessage(message::New(process_t(0), sessionForResponse(session.Value()), message::Content{}));
+        Suspend(session.Value());
+    }
+
     void Response(process_t source, session_t session, message::Content content) {
         if (Process *p = Find(source)) {
             p->PushMessage(message::New(Pid(), sessionForResponse(session), std::move(content)));
@@ -982,9 +988,7 @@ void Send(process_t pid, session_t session, message::Content content) {
 void Yield() {
     auto running = process::Running();
     assert(running != nullptr);
-    Session session = running->NewSession();
-    running->PushMessage(message::New(process_t(0), sessionForResponse(session.Value()), message::Content{}));
-    running->Suspend(session.Value());
+    running->Yield();
 }
 
 Session::Session(session_t session)
