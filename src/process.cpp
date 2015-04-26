@@ -85,8 +85,6 @@ SetRunning(Coroutine *co) {
     tCoroutine = co;
 }
 
-void Die(Coroutine *co);
-
 message::Content Suspend();
 
 class Scope {
@@ -214,7 +212,6 @@ public:
     void Resume() {
         coroutine::Scope enter(this);
         context::Switch(coroutine::ThreadContext(), _context);
-        GetResult();
     }
 
 private:
@@ -234,17 +231,15 @@ private:
         assert(coroutine::Running() == co);
         co->Run();
         assert(coroutine::Running() == co);
-        coroutine::Die(co);
+        context::Switch(co->Context(), coroutine::ThreadContext());
     }
 
     void Run() {
         try {
             _function();
-        } catch (const coroutine::ExitException&) {
-        } catch (const process::ExitException&) {
-            SetException(std::current_exception());
+            SetException(std::make_exception_ptr(coroutine::ExitException{}));
         } catch (...) {
-            wild::print_exception(std::current_exception());
+            SetException(std::current_exception());
         }
     }
 
@@ -271,10 +266,6 @@ message::Content Suspend() {
     context::Switch(running->Context(), coroutine::ThreadContext());
     assert(running == Running());
     return running->GetResult();
-}
-
-void Resume(Coroutine *co) {
-    co->Resume();
 }
 
 namespace detail {
@@ -589,10 +580,6 @@ public:
         return co;
     }
 
-    void mark_zombie(Coroutine *co) {
-        _zombie_coroutines.push_back(co);
-    }
-
     void sweep_zombies() {
         for (auto co : _zombie_coroutines) {
             Coroutine::Delete(co);
@@ -628,6 +615,23 @@ public:
         }
     }
 
+    void Resume(Coroutine *co, bool exiting = false) {
+        co->Resume();
+        try {
+            co->GetResult();
+        } catch (const coroutine::ExitException&) {
+            _zombie_coroutines.push_back(co);
+        } catch (const process::ExitException&) {
+            _zombie_coroutines.push_back(co);
+            if (!exiting) {
+                throw;
+            }
+        } catch (...) {
+            _zombie_coroutines.push_back(co);
+            wild::print_exception(std::current_exception());
+        }
+    }
+
     void Exit() {
         auto exitException = std::make_exception_ptr(coroutine::ExitException{});
         for (;;) {
@@ -638,7 +642,7 @@ public:
                 break;
             }
             do {
-                coroutine::Resume(wild::take_front(_wakeup_coroutines));
+                Resume(wild::take_front(_wakeup_coroutines), true);
             } while (!_wakeup_coroutines.empty());
         }
         abandon(_spawn_coroutines);
@@ -664,13 +668,13 @@ public:
             || !_wakeup_coroutines.empty()
             || (!_inbox.empty() && !_inbox_coroutines.empty())) {
             while (!_spawn_coroutines.empty()) {
-                coroutine::Resume(wild::take_front(_spawn_coroutines));
+                Resume(wild::take_front(_spawn_coroutines));
             }
             while (!_wakeup_coroutines.empty()) {
-                coroutine::Resume(wild::take_front(_wakeup_coroutines));
+                Resume(wild::take_front(_wakeup_coroutines));
             }
             while (!_inbox.empty() && !_inbox_coroutines.empty()) {
-                coroutine::Resume(wild::take_front(_inbox_coroutines));
+                Resume(wild::take_front(_inbox_coroutines));
             }
         }
         sweep_zombies();
@@ -1004,12 +1008,6 @@ void Session::close() {
 }
 
 namespace coroutine {
-
-void Die(Coroutine *co) {
-    auto p = process::Running();
-    p->mark_zombie(co);
-    context::Switch(co->Context(), coroutine::ThreadContext());
-}
 
 void Spawn(std::function<void()> func, size_t addstack) {
     auto p = process::Running();
