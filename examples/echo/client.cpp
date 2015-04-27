@@ -1,5 +1,4 @@
 #include "stp.hpp"
-#include "timer.hpp"
 #include "net.hpp"
 #include "io.hpp"
 
@@ -56,7 +55,6 @@ main() {
     });
 
     for (;;) {
-        timer::UpdateTime();
         usleep(1000);
     }
 }

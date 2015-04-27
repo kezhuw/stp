@@ -1,4 +1,4 @@
-#include "timer.hpp"
+#include "time.hpp"
 #include "types.hpp"
 #include "message.hpp"
 #include "process.hpp"
@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <thread>
 
 // About algorithm See:
 //
@@ -22,7 +23,7 @@
 namespace {
 
 using namespace stp;
-using namespace stp::timer;
+using namespace stp::time;
 
 #define FIRST_NODE_FIELD    struct timer_node *link
 
@@ -229,10 +230,25 @@ std::atomic<uint64> STARTTIME_REALTIME;
 process_t TIMER_SERVICE;
 
 void
+tick(process_t timer) {
+    for (;;) {
+        uint64 now = _gettime();
+        assert(now >= STARTTIME.load(std::memory_order_relaxed));
+        uint64 time = now - STARTTIME.load(std::memory_order_relaxed);
+        if (time > TIME.load(std::memory_order_relaxed)) {
+            TIME.store(time, std::memory_order_relaxed);
+            process::send(timer, UpdateMessage{time});
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(1000));
+    }
+}
+
+void
 init() {
     STARTTIME.store(_gettime(), std::memory_order_relaxed);
     STARTTIME_REALTIME.store(_realtime(), std::memory_order_relaxed);
     TIMER_SERVICE = process::spawn(_main, sizeof(struct Timer));
+    std::thread(tick, TIMER_SERVICE).detach();
 }
 
 wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Timer);
@@ -240,22 +256,7 @@ wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Ti
 }
 
 namespace stp {
-namespace timer {
-
-uint64
-Time() {
-    return TIME.load(std::memory_order_relaxed);
-}
-
-uint64
-StartTime() {
-    return STARTTIME_REALTIME.load(std::memory_order_relaxed);
-}
-
-uint64
-RealTime() {
-    return StartTime() + Time();
-}
+namespace time {
 
 void
 sleep(uint64 msecs) {
@@ -263,15 +264,22 @@ sleep(uint64 msecs) {
 }
 
 uint64
-UpdateTime() {
-    uint64 now = _gettime();
-    assert(now >= STARTTIME.load(std::memory_order_relaxed));
-    uint64 time = now - STARTTIME.load(std::memory_order_relaxed);
-    if (time > TIME.load(std::memory_order_relaxed)) {
-        TIME.store(time, std::memory_order_relaxed);
-        process::send(TIMER_SERVICE, UpdateMessage{time});
-    }
+startup_time() {
+    return STARTTIME_REALTIME.load(std::memory_order_relaxed);
+}
+
+namespace monotonic {
+
+uint64
+now() {
     return TIME.load(std::memory_order_relaxed);
+}
+
+uint64
+real_time() {
+    return startup_time() + now();
+}
+
 }
 
 }

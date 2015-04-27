@@ -3,7 +3,7 @@
 #include "module.hpp"
 #include "context.hpp"
 #include "coroutine.hpp"
-#include "timer.hpp"
+#include "time.hpp"
 
 #include <wild/BlockingQueue.hpp>
 #include <wild/exception.hpp>
@@ -251,7 +251,7 @@ private:
 void wakeup(Coroutine *co);
 
 void sleep(uint64 msecs) {
-    timer::sleep(msecs);
+    time::sleep(msecs);
 }
 
 void exit() {
