@@ -261,7 +261,7 @@ using string = wild::string;
 namespace io = wild::io;
 
 std::tuple<wild::Fd, std::error_condition>
-Listen(const char *addr) {
+listen(const char *addr) {
     struct addrinfo *res;
     if (auto err = _getaddrinfo(addr, &res, AI_PASSIVE)) {
         return std::make_tuple(wild::Fd(), err);
@@ -272,11 +272,11 @@ Listen(const char *addr) {
 
     int lastErrno = 0;
     for (struct addrinfo *ai = res; ai != NULL && nsocket < 2; ai = ai->ai_next) {
-        int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_FLAGS, ai->ai_protocol);
+        int fd = ::socket(ai->ai_family, ai->ai_socktype | SOCK_FLAGS, ai->ai_protocol);
         if (fd != -1) {
             if (_option(fd) == 0
              && bind(fd, ai->ai_addr, ai->ai_addrlen) == 0
-             && listen(fd, SOMAXCONN) == 0) {
+             && ::listen(fd, SOMAXCONN) == 0) {
                 sockets[nsocket++] = fd;
                 continue;
             }
@@ -299,7 +299,7 @@ Listen(const char *addr) {
 }
 
 std::tuple<wild::Fd, std::error_condition>
-Connect(const char *addr) {
+connect(const char *addr) {
     struct addrinfo *res;
     if (auto error = _getaddrinfo(addr, &res, 0)) {
         return std::make_tuple(wild::Fd(), error);
@@ -312,18 +312,18 @@ Connect(const char *addr) {
     int lastErrno = 0;
     struct addrinfo *ai = res;
     do {
-        int rawfd = socket(ai->ai_family, ai->ai_socktype | SOCK_FLAGS, ai->ai_protocol);
+        int rawfd = ::socket(ai->ai_family, ai->ai_socktype | SOCK_FLAGS, ai->ai_protocol);
         if (rawfd < 0) {
             lastErrno = errno;
             continue;
         }
         wild::Fd wildfd(rawfd);
-        int e = connect(rawfd, ai->ai_addr, ai->ai_addrlen);
+        int e = ::connect(rawfd, ai->ai_addr, ai->ai_addrlen);
         if (e != 0 && errno != EINPROGRESS) {
             lastErrno = errno;
             continue;
         }
-        fd::Wait(rawfd, fd::Event::Write);
+        fd::wait(rawfd, fd::Event::kWrite);
         lastErrno = _getsockerr(rawfd);
         if (lastErrno) {
             continue;
@@ -335,7 +335,7 @@ Connect(const char *addr) {
 }
 
 std::tuple<wild::Fd, std::error_condition>
-Accept(const wild::Fd& fd, string *from) {
+accept(const wild::Fd& fd, string *from) {
     int listener = fd.RawFd();
     union sockaddr_all addr;
     for (;;) {
@@ -345,7 +345,7 @@ Accept(const wild::Fd& fd, string *from) {
             int err = errno;
             switch (err) {
             case EAGAIN:
-                fd::Wait(listener, fd::Event::Read);
+                fd::wait(listener, fd::Event::kRead);
             case EINTR:
                 continue;
             default:

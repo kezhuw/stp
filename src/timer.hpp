@@ -7,7 +7,7 @@ namespace timer {
 
 // Millisecond resolution.
 
-void Sleep(uint64 msecs);
+void sleep(uint64 msecs);
 
 // zero-based monotonic time from startup.
 uint64 Time();

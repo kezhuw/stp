@@ -83,7 +83,7 @@ namespace context {
 class Context {
 public:
 
-    static Context *New() {
+    static Context *create() {
         if (auto ctx = allocContext()) {
             new (ctx) Context();
             return ctx;
@@ -91,7 +91,7 @@ public:
         return new Context();
     }
 
-    static Context *New(void (*func)(void*), void *arg, size_t addstack) {
+    static Context *create(void (*func)(void*), void *arg, size_t addstack) {
         if (auto ctx = allocContext()) {
             new (ctx) Context(func, arg, addstack);
             return ctx;
@@ -99,12 +99,12 @@ public:
         return new Context(func, arg, addstack);
     }
 
-    static void Delete(Context *ctx) {
+    static void destroy(Context *ctx) {
         ctx->~Context();
         deallocContext(ctx);
     }
 
-    static void Switch(Context *current, Context *to) {
+    static void transfer(Context *current, Context *to) {
         swapcontext(&current->_ucontext, &to->_ucontext);
     }
 
@@ -174,20 +174,20 @@ wild::FreeList<Context> Context::gFrees;
 
 thread_local wild::FreeList<Context> Context::tFrees;
 
-Context* New() {
-    return Context::New();
+Context* create() {
+    return Context::create();
 }
 
-Context* New(void (*func)(void *), void *arg, size_t addstack) {
-    return Context::New(func, arg, addstack);
+Context* create(void (*func)(void *), void *arg, size_t addstack) {
+    return Context::create(func, arg, addstack);
 }
 
-void Switch(Context *current, Context *to) {
-    Context::Switch(current, to);
+void transfer(Context *current, Context *to) {
+    Context::transfer(current, to);
 }
 
-void Delete(Context *ctx) {
-    Context::Delete(ctx);
+void destroy(Context *ctx) {
+    Context::destroy(ctx);
 }
 
 }

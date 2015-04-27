@@ -46,8 +46,8 @@ struct filter {
 };
 
 struct fdata {
-    static_assert(static_cast<int>(Event::Read) == 0, "");
-    static_assert(static_cast<int>(Event::Write) == 1, "");
+    static_assert(static_cast<int>(Event::kRead) == 0, "");
+    static_assert(static_cast<int>(Event::kWrite) == 1, "");
     struct filter filters[2];
 };
 
@@ -118,7 +118,7 @@ void _epoll_poll(int epfd) {
             int nevent = epoll_wait(fd, events, std::extent<decltype(events)>::value, 0);
             while (nevent-- > 0) {
                 auto fi = static_cast<struct filter*>(events[nevent].data.ptr);
-                process::Response(process_t(fi->source), session_t(fi->session));
+                process::response(process_t(fi->source), session_t(fi->session));
             }
         }
     }
@@ -157,8 +157,8 @@ wild::module::Definition fd_poll(module::STP, "stp:fd_epoll", init, module::Orde
 namespace stp {
 namespace fd {
 
-void Wait(int fd, Event event) {
-    process::Session session = process::NewSession();
+void wait(int fd, Event event) {
+    process::Session session = process::new_session();
     struct filter *fi = FDSET.selectFilter(fd, event);
     fi->source = session.Pid().Value();
     fi->session = session.Value().Value();
@@ -175,7 +175,7 @@ void Wait(int fd, Event event) {
         // reporting of fd, but no deletion is performed.
         _epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ev);
     };
-    process::Suspend(session.Value());
+    process::suspend(session.Value());
 }
 
 }

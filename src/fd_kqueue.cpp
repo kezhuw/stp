@@ -49,7 +49,7 @@ void kqueue_poll(int kq) {
             auto udata = reinterpret_cast<uintptr>(ev->udata);
             auto pid = static_cast<uint32>(udata);
             auto sid = static_cast<uint32>(udata >> 32);
-            process::Response(process_t(pid), session_t(sid));
+            process::response(process_t(pid), session_t(sid));
         }
     }
 }
@@ -74,19 +74,19 @@ namespace fd {
 static_assert(std::is_same<decltype(std::declval<process_t>().Value()), uint32>::value, "");
 static_assert(std::is_same<decltype(std::declval<session_t>().Value()), uint32>::value, "");
 
-void Wait(int fd, Event event) {
-    assert(event == Event::Read || event == Event::Write);
-    process::Session session = process::NewSession();
+void wait(int fd, Event event) {
+    assert(event == Event::kRead || event == Event::kWrite);
+    process::Session session = process::new_session();
     auto pid = session.Pid().Value();
     auto sid = session.Value().Value();
     void *udate = reinterpret_cast<void*>(static_cast<uintptr>(pid) | (static_cast<uintptr>(sid) << 32));
     struct kevent ev;
-    short filter = event == Event::Read ? EVFILT_READ : EVFILT_WRITE;
+    short filter = event == Event::kRead ? EVFILT_READ : EVFILT_WRITE;
     EV_SET(&ev, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, udate);
     if (kevent(kqfd, &ev, 1, NULL, 0, NULL) == -1) {
         throw std::system_error(errno, std::system_category(), "kevent(EV_ADD)");
     }
-    process::Suspend(session.Value());
+    process::suspend(session.Value());
 }
 
 }

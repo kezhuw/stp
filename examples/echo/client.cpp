@@ -22,34 +22,34 @@ main() {
         fprintf(stderr, "%s: start\n", name);
         wild::Fd server;
         std::error_condition error;
-        std::tie(server, error) = net::tcp::Connect("tcp4://*:3000");
+        std::tie(server, error) = net::tcp::connect("tcp4://*:3000");
         fprintf(stderr, "%s: connected\n", name);
         if (error) {
             printf("%s: fail to connect: %s\n", name, error.message().c_str());
-            process::Exit();
+            process::exit();
         }
         byte_t data[] = u8"0123456789abcdefghijklmnopqrstuvwxyz";
         for (int i=0; i<50000; ++i) {
             int err;
-            std::tie(std::ignore, err) = io::Write(server.RawFd(), data, sizeof data);
+            std::tie(std::ignore, err) = io::write(server.RawFd(), data, sizeof data);
             if (err) {
-                printf("%s: io::Write(): %s\n", name, wild::os::strerror(err));
+                printf("%s: io::write(): %s\n", name, wild::os::strerror(err));
                 break;
             }
-            std::tie(std::ignore, err) = io::ReadFull(server.RawFd(), data, sizeof data);
+            std::tie(std::ignore, err) = io::read_full(server.RawFd(), data, sizeof data);
             if (err) {
-                printf("%s: io::ReadFull(): %s\n", name, wild::os::strerror(err));
+                printf("%s: io::read_full(): %s\n", name, wild::os::strerror(err));
                 break;
             }
-            coroutine::Sleep(500);
+            coroutine::sleep(500);
         }
     };
 
-    process::Spawn([&client] {
+    process::spawn([&client] {
         char name[1024];
         for (int i=1; i<=10000; ++i) {
             snprintf(name, sizeof name, "client %d", i);
-            process::Spawn([&client, name = string(name)] {
+            process::spawn([&client, name = string(name)] {
                 client(std::move(name));
             });
         }

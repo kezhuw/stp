@@ -7,13 +7,13 @@ namespace context {
 
 class Context;
 
-Context* New();
+Context* create();
 
-Context* New(void (*func)(void *), void *arg, size_t stacksize = 0);
+Context* create(void (*func)(void *), void *arg, size_t stacksize = 0);
 
-void Switch(Context *current, Context *to);
+void transfer(Context *current, Context *to);
 
-void Delete(Context *ctx);
+void destroy(Context *ctx);
 
 }
 }

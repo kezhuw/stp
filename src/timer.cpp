@@ -104,7 +104,7 @@ _free_node(struct Timer *t, struct timer_node *node) {
 
 inline void
 _send(pid_t pid, sid_t session) {
-    process::Response(process_t(pid), session_t(session), message::Content{});
+    process::response(process_t(pid), session_t(session), message::Content{});
 }
 
 void
@@ -198,7 +198,7 @@ struct TimeoutMessage {
 void
 _main() {
     struct Timer t;
-    process::Loop([&t](process_t source, session_t session, message::Content content) {
+    process::loop([&t](process_t source, session_t session, message::Content content) {
         if (UpdateMessage *update = wild::Any::Cast<UpdateMessage>(&content)) {
             _update(&t, update->timestamp);
         } else if (TimeoutMessage *timeout = wild::Any::Cast<TimeoutMessage>(&content)) {
@@ -232,7 +232,7 @@ void
 init() {
     STARTTIME.store(_gettime(), std::memory_order_relaxed);
     STARTTIME_REALTIME.store(_realtime(), std::memory_order_relaxed);
-    TIMER_SERVICE = process::Spawn(_main, sizeof(struct Timer));
+    TIMER_SERVICE = process::spawn(_main, sizeof(struct Timer));
 }
 
 wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Timer);
@@ -258,8 +258,8 @@ RealTime() {
 }
 
 void
-Sleep(uint64 msecs) {
-    process::Request(TIMER_SERVICE, TimeoutMessage{msecs});
+sleep(uint64 msecs) {
+    process::request(TIMER_SERVICE, TimeoutMessage{msecs});
 }
 
 uint64
@@ -269,7 +269,7 @@ UpdateTime() {
     uint64 time = now - STARTTIME.load(std::memory_order_relaxed);
     if (time > TIME.load(std::memory_order_relaxed)) {
         TIME.store(time, std::memory_order_relaxed);
-        process::Send(TIMER_SERVICE, UpdateMessage{time});
+        process::send(TIMER_SERVICE, UpdateMessage{time});
     }
     return TIME.load(std::memory_order_relaxed);
 }

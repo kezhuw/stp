@@ -45,12 +45,12 @@ deallocMessage(Message *m) {
 namespace stp {
 namespace message {
 
-Message *New(process_t source, session_t session, message::Content content) {
+Message *create(process_t source, session_t session, message::Content content) {
     auto m = allocMessage();
     return new (m) Message{source, session, content};
 }
 
-void Delete(Message *msg) {
+void destroy(Message *msg) {
     msg->~Message();
     deallocMessage(msg);
 }

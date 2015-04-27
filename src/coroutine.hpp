@@ -8,12 +8,12 @@
 namespace stp {
 namespace coroutine {
 
-void Spawn(std::function<void()> func, size_t addstack = 0);
-void Timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
+void spawn(std::function<void()> func, size_t addstack = 0);
+void timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
 
-void Sleep(uint64 msecs);
+void sleep(uint64 msecs);
 
-void Exit();
+void exit();
 
 class Mutex {
 public:

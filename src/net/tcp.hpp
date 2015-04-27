@@ -12,10 +12,10 @@ namespace stp {
 namespace net {
 namespace tcp {
 
-std::tuple<wild::Fd, std::error_condition> Listen(const char *addr);
-std::tuple<wild::Fd, std::error_condition> Accept(const wild::Fd& fd, string *from);
+std::tuple<wild::Fd, std::error_condition> listen(const char *addr);
+std::tuple<wild::Fd, std::error_condition> accept(const wild::Fd& fd, string *from);
 
-std::tuple<wild::Fd, std::error_condition> Connect(const char *addr);
+std::tuple<wild::Fd, std::error_condition> connect(const char *addr);
 
 }
 }

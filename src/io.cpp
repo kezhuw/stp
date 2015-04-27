@@ -13,7 +13,7 @@ namespace stp {
 namespace io {
 
 std::tuple<size_t, int>
-ReadFull(int fd, byte_t *buf, size_t len) {
+read_full(int fd, byte_t *buf, size_t len) {
     size_t rd = 0;
     size_t n;
     int err;
@@ -27,7 +27,7 @@ ReadFull(int fd, byte_t *buf, size_t len) {
         switch (err) {
         case EAGAIN:
             buf += n;
-            fd::Wait(fd, fd::Event::Read);
+            fd::wait(fd, fd::Event::kRead);
             break;
         case EEOF:
             if (rd != 0) {
@@ -40,7 +40,7 @@ ReadFull(int fd, byte_t *buf, size_t len) {
 }
 
 std::tuple<size_t, int>
-Read(int fd, byte_t *buf, size_t len) {
+read(int fd, byte_t *buf, size_t len) {
     size_t rd = 0;
     for (;;) {
         size_t n, err;
@@ -53,7 +53,7 @@ Read(int fd, byte_t *buf, size_t len) {
         switch (err) {
         case EAGAIN:
             if (rd == 0) {
-                fd::Wait(fd, fd::Event::Read);
+                fd::wait(fd, fd::Event::kRead);
                 break;
             }
             return std::make_tuple(rd, 0);
@@ -64,7 +64,7 @@ Read(int fd, byte_t *buf, size_t len) {
 }
 
 std::tuple<size_t, int>
-Write(int fd, byte_t *data, size_t size) {
+write(int fd, byte_t *data, size_t size) {
     size_t wr = 0;
     for (;;) {
         size_t n;
@@ -78,7 +78,7 @@ Write(int fd, byte_t *data, size_t size) {
         switch (err) {
         case EAGAIN:
             data += n;
-            fd::Wait(fd, fd::Event::Write);
+            fd::wait(fd, fd::Event::kWrite);
             break;
         default:
             return std::make_tuple(wr, err);

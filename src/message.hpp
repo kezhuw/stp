@@ -25,9 +25,9 @@ struct Message {
     Content content;
 };
 
-Message* New(process::process_t source, process::session_t session, message::Content content);
+Message* create(process::process_t source, process::session_t session, message::Content content);
 
-void Delete(Message *m);
+void destroy(Message *m);
 
 // one reader, multiple writer, nonblocking.
 // After nullptr returned from take(), reader

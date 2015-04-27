@@ -40,7 +40,7 @@ namespace stp {
 using Process = process::Process;
 using Coroutine = coroutine::Coroutine;
 
-namespace sched { static void Resume(Process *); }
+namespace sched { static void resume(Process *); }
 
 struct KillProcess {};
 struct AbortedRequest {};
@@ -67,34 +67,34 @@ MessageType typeOfMessage(message::Message *msg) {
 
 namespace coroutine {
 
-static thread_local context::Context *tContext = context::New();
+static thread_local context::Context *tContext = context::create();
 static thread_local stp::coroutine::Coroutine *tCoroutine;
 
 context::Context *
-ThreadContext() {
+thread_context() {
     return tContext;
 }
 
 Coroutine *
-Running() {
+current() {
     return tCoroutine;
 }
 
 void
-SetRunning(Coroutine *co) {
+set_running(Coroutine *co) {
     tCoroutine = co;
 }
 
-message::Content Suspend();
+message::Content suspend();
 
 class Scope {
 public:
     Scope(Coroutine *co) {
-        // assert(Running() == nullptr);
-        SetRunning(co);
+        // assert(current() == nullptr);
+        set_running(co);
     }
     ~Scope() {
-        SetRunning(nullptr);
+        set_running(nullptr);
     }
 };
 
@@ -111,23 +111,23 @@ namespace process {
 static thread_local Process *tProcess;
 
 Process *
-Running() {
+current() {
     return tProcess;
 }
 
 void
-SetRunning(Process *p) {
+set_running(Process *p) {
     tProcess = p;
 }
 
 class Scope {
 public:
     Scope(Process *p) {
-        assert(Running() == nullptr);
-        SetRunning(p);
+        assert(current() == nullptr);
+        set_running(p);
     }
     ~Scope() {
-        SetRunning(nullptr);
+        set_running(nullptr);
     }
 };
 
@@ -151,8 +151,8 @@ struct KillException : public std::exception {
     }
 };
 
-void Ref(Process *);
-void Unref(Process *);
+void ref(Process *);
+void unref(Process *);
 
 }
 
@@ -184,34 +184,34 @@ private:
 class Coroutine {
 public:
 
-    context::Context* Context() {
+    context::Context* context() {
         return _context;
     }
 
-    message::Content GetResult() {
+    message::Content get_result() {
         return _result.get_value();
     }
 
-    void SetResult(message::Content value) {
+    void set_result(message::Content value) {
         _result.set_value(std::move(value));
     }
 
-    void SetException(const std::exception_ptr &e) {
+    void set_exception(const std::exception_ptr &e) {
         _result.set_exception(e);
     }
 
     // TODO allocate from thread local coroutine pool.
-    static Coroutine *New(std::function<void()> func, size_t addstack) {
+    static Coroutine *create(std::function<void()> func, size_t addstack) {
         return new Coroutine(std::move(func), addstack);
     }
 
-    static void Delete(Coroutine *co) {
+    static void destroy(Coroutine *co) {
         delete co;
     }
 
-    void Resume() {
+    void resume() {
         coroutine::Scope enter(this);
-        context::Switch(coroutine::ThreadContext(), _context);
+        context::transfer(coroutine::thread_context(), _context);
     }
 
 private:
@@ -219,27 +219,27 @@ private:
     Coroutine(std::function<void()> func, size_t addstack)
         : _context(nullptr)
         , _function(std::move(func)) {
-#define CoroutineMain   reinterpret_cast<void(*)(void*)>(&Coroutine::Main)
-        _context = context::New(CoroutineMain, static_cast<void*>(this), addstack);
+#define CoroutineMain   reinterpret_cast<void(*)(void*)>(&Coroutine::main)
+        _context = context::create(CoroutineMain, static_cast<void*>(this), addstack);
     }
 
     ~Coroutine() {
-        context::Delete(_context);
+        context::destroy(_context);
     }
 
-    static void Main(Coroutine *co) {
-        assert(coroutine::Running() == co);
-        co->Run();
-        assert(coroutine::Running() == co);
-        context::Switch(co->Context(), coroutine::ThreadContext());
+    static void main(Coroutine *co) {
+        assert(coroutine::current() == co);
+        co->run();
+        assert(coroutine::current() == co);
+        context::transfer(co->context(), coroutine::thread_context());
     }
 
-    void Run() {
+    void run() {
         try {
             _function();
-            SetException(std::make_exception_ptr(coroutine::ExitException{}));
+            set_exception(std::make_exception_ptr(coroutine::ExitException{}));
         } catch (...) {
-            SetException(std::current_exception());
+            set_exception(std::current_exception());
         }
     }
 
@@ -248,24 +248,24 @@ private:
     std::function<void()> _function;
 };
 
-void Wakeup(Coroutine *co);
+void wakeup(Coroutine *co);
 
-void Sleep(uint64 msecs) {
-    timer::Sleep(msecs);
+void sleep(uint64 msecs) {
+    timer::sleep(msecs);
 }
 
-void Exit() {
-    Coroutine *running = Running();
+void exit() {
+    Coroutine *running = current();
     assert(running != nullptr);
     throw coroutine::ExitException();
 }
 
-message::Content Suspend() {
-    Coroutine *running = Running();
+message::Content suspend() {
+    Coroutine *running = current();
     assert(running != nullptr);
-    context::Switch(running->Context(), coroutine::ThreadContext());
-    assert(running == Running());
-    return running->GetResult();
+    context::transfer(running->context(), coroutine::thread_context());
+    assert(running == current());
+    return running->get_result();
 }
 
 namespace detail {
@@ -314,7 +314,7 @@ void Mutex::unref(Mutex* m) {
 }
 
 void Mutex::lock() {
-    auto running = Running();
+    auto running = current();
     assert(running != nullptr);
     if (_coroutines.empty()) {
         _coroutines.push_back(running);
@@ -322,7 +322,7 @@ void Mutex::lock() {
         assert(_coroutines.front() != running);
         _coroutines.push_back(running);
         try {
-            coroutine::Suspend();
+            coroutine::suspend();
             assert(!_coroutines.empty());
             assert(_coroutines.front() == running);
         } catch (...) {
@@ -334,7 +334,7 @@ void Mutex::lock() {
 
 bool Mutex::try_lock() {
     if (_coroutines.empty()) {
-        auto running = Running();
+        auto running = current();
         assert(running != nullptr);
         _coroutines.push_back(running);
         return true;
@@ -343,14 +343,14 @@ bool Mutex::try_lock() {
 }
 
 void Mutex::unlock() {
-    auto running_ = Running();
+    auto running_ = current();
     assert(running_ != nullptr);
     assert(!_coroutines.empty());
     assert(_coroutines.front() == running_);
     _coroutines.pop_front();
     if (!_coroutines.empty()) {
         auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
-        coroutine::Wakeup(pending);
+        coroutine::wakeup(pending);
     }
 }
 
@@ -405,12 +405,12 @@ void Condition::unref(Condition *c) {
 }
 
 void Condition::wait(Mutex& locker) {
-    auto running = Running();
+    auto running = current();
     assert(running != nullptr);
     locker.unlock();
     _coroutines.push_back(running);
     try {
-        coroutine::Suspend();
+        coroutine::suspend();
         locker.lock();
     } catch (const coroutine::ExitException&) {
         locker.lock();
@@ -429,21 +429,21 @@ void Condition::wait(Mutex& locker, std::function<bool()> pred) {
 void Condition::notify_one() {
     if (!_coroutines.empty()) {
         auto pending = wild::take_front(_coroutines);
-        coroutine::Wakeup(pending);
+        coroutine::wakeup(pending);
     }
 }
 
 void Condition::notify_all() {
     for (auto pending : _coroutines) {
-        coroutine::Wakeup(pending);
+        coroutine::wakeup(pending);
     }
     _coroutines.clear();
 }
 
 void Condition::interrupt_all(std::exception_ptr e) {
     for (auto pending : _coroutines) {
-        pending->SetException(e);
-        coroutine::Wakeup(pending);
+        pending->set_exception(e);
+        coroutine::wakeup(pending);
     }
     _coroutines.clear();
 }
@@ -524,7 +524,7 @@ namespace process {
 static wild::SpinLock gProcsLocker;
 static std::unordered_map<uint32, Process*> gProcsMap;
 
-static process_t Register(Process *p) {
+static process_t reg(Process *p) {
     static uint32 seq = 0;
     uint32 id;
     WITH_LOCK(gProcsLocker) {
@@ -534,18 +534,18 @@ static process_t Register(Process *p) {
     return process_t(id);
 }
 
-static bool Unregister(process_t pid) {
+static bool unreg(process_t pid) {
     WITH_LOCK(gProcsLocker) {
         return gProcsMap.erase(pid.Value()) == 1;
     }
 }
 
-static Process *Find(process_t pid) {
+static Process *find(process_t pid) {
     WITH_LOCK(gProcsLocker) {
         auto it = gProcsMap.find(pid.Value());
         if (it != gProcsMap.end()) {
             Process *p = it->second;
-            process::Ref(p);
+            process::ref(p);
             return p;
         }
     }
@@ -555,19 +555,17 @@ static Process *Find(process_t pid) {
 class Process {
 public:
 
-    void PushMessage(message::Message *msg) {
+    void push_message(message::Message *msg) {
         bool wait = _mailbox.push(msg);
         if (wait) {
-            sched::Resume(this);
+            sched::resume(this);
         }
     }
 
-    message::Message *PopMessage();
-
-    message::Content Suspend(session_t session) {
-        Coroutine *running = coroutine::Running();
+    message::Content suspend(session_t session) {
+        Coroutine *running = coroutine::current();
         _block_sessions[session] = running;
-        return coroutine::Suspend();
+        return coroutine::suspend();
     }
 
     Coroutine *unblock(session_t session) {
@@ -582,7 +580,7 @@ public:
 
     void sweep_zombies() {
         for (auto co : _zombie_coroutines) {
-            Coroutine::Delete(co);
+            Coroutine::destroy(co);
         }
         _zombie_coroutines.clear();
     }
@@ -594,8 +592,8 @@ public:
 
     void interrupt_inbox_coroutines(std::exception_ptr e) {
         for (auto co : _inbox_coroutines) {
-            co->SetException(e);
-            Wakeup(co);
+            co->set_exception(e);
+            wakeup(co);
         }
         _inbox_coroutines.clear();
     }
@@ -603,8 +601,8 @@ public:
     void interrupt_block_coroutines(std::exception_ptr e) {
         for (auto value : _block_sessions) {
             auto co = value.second;
-            co->SetException(e);
-            Wakeup(co);
+            co->set_exception(e);
+            wakeup(co);
         }
         _block_sessions.clear();
     }
@@ -615,10 +613,10 @@ public:
         }
     }
 
-    void Resume(Coroutine *co, bool exiting = false) {
-        co->Resume();
+    void resume(Coroutine *co, bool exiting = false) {
+        co->resume();
         try {
-            co->GetResult();
+            co->get_result();
         } catch (const coroutine::ExitException&) {
             _zombie_coroutines.push_back(co);
         } catch (const process::ExitException&) {
@@ -632,7 +630,7 @@ public:
         }
     }
 
-    void Exit() {
+    void exit() {
         auto exitException = std::make_exception_ptr(coroutine::ExitException{});
         for (;;) {
             interrupt_inbox_coroutines(exitException);
@@ -642,24 +640,24 @@ public:
                 break;
             }
             do {
-                Resume(wild::take_front(_wakeup_coroutines), true);
+                resume(wild::take_front(_wakeup_coroutines), true);
             } while (!_wakeup_coroutines.empty());
         }
         abandon(_spawn_coroutines);
         sweep_zombies();
     }
 
-    bool Dispatch() {
+    bool dispatch() {
         try {
-            Schedule();
+            run();
         } catch (const process::ExitException&) {
-            Exit();
+            exit();
             return false;
         }
         return !(_inbox_coroutines.empty() && _block_sessions.empty());
     }
 
-    void Schedule() {
+    void run() {
         // running coroutine may:
         //   spawn new coroutine;
         //   wakeup suspended coroutine;
@@ -668,19 +666,19 @@ public:
             || !_wakeup_coroutines.empty()
             || (!_inbox.empty() && !_inbox_coroutines.empty())) {
             while (!_spawn_coroutines.empty()) {
-                Resume(wild::take_front(_spawn_coroutines));
+                resume(wild::take_front(_spawn_coroutines));
             }
             while (!_wakeup_coroutines.empty()) {
-                Resume(wild::take_front(_wakeup_coroutines));
+                resume(wild::take_front(_wakeup_coroutines));
             }
             while (!_inbox.empty() && !_inbox_coroutines.empty()) {
-                Resume(wild::take_front(_inbox_coroutines));
+                resume(wild::take_front(_inbox_coroutines));
             }
         }
         sweep_zombies();
     }
 
-    void Wakeup(Coroutine *co) {
+    void wakeup(Coroutine *co) {
         _wakeup_coroutines.push_back(co);
     }
 
@@ -690,9 +688,9 @@ public:
         kBreak          = 2,
     };
 
-    ResumeResult Resume() {
+    ResumeResult resume() {
         process::Scope enter(this);
-        if (!Dispatch()) {
+        if (!dispatch()) {
             return ResumeResult::kDown;
         }
         auto msg = _mailbox.take();
@@ -700,27 +698,27 @@ public:
             MessageType msgType = typeOfMessage(msg);
             switch (msgType) {
             case MessageType::kRequest:
-                ServeRequest(msg->source, msg->session);
+                serve_request(msg->source, msg->session);
                 _inbox.push_back(msg);
                 break;
             case MessageType::kResponse: {
                 uint32 session = -msg->session.Value();
                 if (Coroutine *co = unblock(session_t(session))) {
                     if (msg->content.type() == typeid(AbortedRequest)) {
-                        co->SetException(std::make_exception_ptr(RequestAborted{}));
+                        co->set_exception(std::make_exception_ptr(RequestAborted{}));
                     } else {
-                        co->SetResult(std::move(msg->content));
+                        co->set_result(std::move(msg->content));
                     }
-                    Wakeup(co);
+                    wakeup(co);
                 } else {
                     printf("unknown response session[%u]\n", session);
                 }
-                message::Delete(msg);
+                message::destroy(msg);
                 } break;
             case MessageType::kNotify:
                 if (msg->content.type() == typeid(KillProcess)) {
-                    message::Delete(msg);
-                    Exit();
+                    message::destroy(msg);
+                    exit();
                     return ResumeResult::kDown;
                 }
                 _inbox.push_back(msg);
@@ -731,82 +729,82 @@ public:
         return ResumeResult::kBreak;
     }
 
-    void Yield() {
-        Session session = NewSession();
-        PushMessage(message::New(process_t(0), sessionForResponse(session.Value()), message::Content{}));
-        Suspend(session.Value());
+    void yield() {
+        Session session = new_session();
+        push_message(message::create(process_t(0), sessionForResponse(session.Value()), message::Content{}));
+        suspend(session.Value());
     }
 
-    void Response(process_t source, session_t session, message::Content content) {
-        if (Process *p = Find(source)) {
-            p->PushMessage(message::New(Pid(), sessionForResponse(session), std::move(content)));
-            process::Unref(p);
+    void response(process_t source, session_t session, message::Content content) {
+        if (Process *p = find(source)) {
+            p->push_message(message::create(pid(), sessionForResponse(session), std::move(content)));
+            process::unref(p);
         }
-        DoneRequest(source, session);
+        close_request(source, session);
     }
 
     std::unordered_set<std::tuple<process_t, session_t>> _requestsMap;
 
-    Session NewSession() {
+    Session new_session() {
         uint32 id = _sessions.NewId();
         return Session(reinterpret_cast<uintptr>(this), session_t(id));
     }
 
-    void ReleaseSession(session_t session) {
+    void release_session(session_t session) {
         _sessions.Erase(session.Value());
     }
 
-    process_t Pid() const {
+    process_t pid() const {
         return _pid;
     }
 
     message::Message *nextMessage() {
-        Coroutine *co = coroutine::Running();
+        Coroutine *co = coroutine::current();
         assert(co != nullptr);
         while (_inbox.empty()) {
             _inbox_coroutines.push_back(co);
-            coroutine::Suspend();
+            coroutine::suspend();
         }
         return wild::take_front(_inbox);
     }
 
-    void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
+    void loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
         for (;;) {
             Message *msg = nextMessage();
             SCOPE_EXIT {
-                message::Delete(msg);
+                message::destroy(msg);
             };
             callback(msg->source, msg->session, std::move(msg->content));
         }
     }
 
-    void Spawn(std::function<void()> func, size_t addstack) {
-        auto co = Coroutine::New(std::move(func), addstack);
+    void spawn(std::function<void()> func, size_t addstack) {
+        auto co = Coroutine::create(std::move(func), addstack);
         _spawn_coroutines.push_back(co);
     }
 
-    static Process *New(std::function<void()> func, size_t addstack) {
+    static Process *create(std::function<void()> func, size_t addstack) {
         auto p = new Process();
-        p->_pid = Register(p);
-        p->Spawn(std::move(func), addstack);
+        p->_pid = reg(p);
+        p->spawn(std::move(func), addstack);
         return p;
     }
 
-    void ServeRequest(process_t source, session_t session) {
+    void serve_request(process_t source, session_t session) {
         _requestsMap.insert(std::make_tuple(source, session));
     }
 
-    void DoneRequest(process_t source, session_t session) {
+    void close_request(process_t source, session_t session) {
         _requestsMap.erase(std::make_tuple(source, session));
     }
 
-    void AbortRequest(process_t source, session_t session) {
-        process::Send(source, sessionForResponse(session), AbortedRequest{});
+    void abort_request(process_t source, session_t session) {
+        process::send(source, sessionForResponse(session), AbortedRequest{});
     }
 
     // XXX
-    // Kill/Unref, when to delete ?
-    static void Delete(Process *p) {
+    // kill/unref, when to delete ?
+    static void destroy(Process *p) {
         printf("delete process: %p\n", p);
         delete p;
     }
@@ -827,20 +825,20 @@ private:
 
     ~Process() {
         for (auto request : _requestsMap) {
-            AbortRequest(std::get<process_t>(request), std::get<session_t>(request));
+            abort_request(std::get<process_t>(request), std::get<session_t>(request));
         }
         while (!_inbox.empty()) {
             Message *msg = wild::take_front(_inbox);
             if (typeOfMessage(msg) == MessageType::kRequest) {
-                AbortRequest(msg->source, msg->session);
+                abort_request(msg->source, msg->session);
             }
-            message::Delete(msg);
+            message::destroy(msg);
         }
         while (Message *msg = _mailbox.take()) {
             if (typeOfMessage(msg) == MessageType::kRequest) {
-                AbortRequest(msg->source, msg->session);
+                abort_request(msg->source, msg->session);
             }
-            message::Delete(msg);
+            message::destroy(msg);
         }
     }
 
@@ -860,139 +858,139 @@ private:
     std::unordered_map<session_t, Coroutine *> _block_sessions;
     std::unordered_set<coroutine::detail::Condition*> _condvars;
 
-    friend void Ref(Process *p);
-    friend void Unref(Process *p);
+    friend void ref(Process *p);
+    friend void unref(Process *p);
 };
 
-void Loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
-    process::Running()->Loop(std::move(callback));
+void loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
+    process::current()->loop(std::move(callback));
 }
 
-void Ref(Process *p) {
+void ref(Process *p) {
     p->_refcnt.fetch_add(1, std::memory_order_relaxed);
 }
 
-void Unref(Process *p) {
+void unref(Process *p) {
     auto refcnt = p->_refcnt.fetch_sub(1, std::memory_order_relaxed);
     if (refcnt == 1) {
         // FIXME How to retire it ?
-        Process::Delete(p);
+        Process::destroy(p);
     }
 }
 
-void Retire(Process *p) {
-    if (Unregister(p->Pid())) {
-        process::Unref(p);
+void retire(Process *p) {
+    if (unreg(p->pid())) {
+        process::unref(p);
         printf("unregister succ %p\n", p);
     } else {
         printf("unregister fail %p\n", p);
     }
 }
 
-void Resume(Process *p) {
-    switch (p->Resume()) {
+void resume(Process *p) {
+    switch (p->resume()) {
     case Process::ResumeResult::kResume:
-        sched::Resume(p);
+        sched::resume(p);
         break;
     case Process::ResumeResult::kDown:
-        process::Retire(p);
+        process::retire(p);
         break;
     default:
         break;
     }
-    process::Unref(p);
+    process::unref(p);
 }
 
 process_t
-Spawn(std::function<void()> func, size_t addstack) {
-    auto p = Process::New(std::move(func), addstack);
-    process_t pid = p->Pid();
-    sched::Resume(p);
+spawn(std::function<void()> func, size_t addstack) {
+    auto p = Process::create(std::move(func), addstack);
+    process_t pid = p->pid();
+    sched::resume(p);
     return pid;
 }
 
 process_t
-Pid() {
-    Process *p = Running();
+self() {
+    Process *p = current();
     if (p) {
-        return p->Pid();
+        return p->pid();
     }
     return process_t();
 }
 
-void Exit() {
-    Process *running = Running();
+void exit() {
+    Process *running = current();
     if (UNLIKELY(!running)) {
-        throw std::runtime_error("call Exit() out of process");
+        throw std::runtime_error("call exit() out of process");
     }
     throw process::ExitException();
 }
 
-void Kill(process_t pid) {
-    process_t self = Pid();
+void kill(process_t pid) {
+    process_t selfPid = self();
     if (pid == process_t(0)) {
-        pid = self;
+        pid = selfPid;
     }
-    if (Process *p = Find(pid)) {
-        p->PushMessage(message::New(self, session_t(), KillProcess{}));
-        process::Unref(p);
+    if (Process *p = find(pid)) {
+        p->push_message(message::create(selfPid, session_t(), KillProcess{}));
+        process::unref(p);
     }
 }
 
-message::Content Suspend(session_t session) {
-    return Running()->Suspend(session);
+message::Content suspend(session_t session) {
+    return current()->suspend(session);
 }
 
-Session NewSession() {
-    Process *running = process::Running();
-    return running->NewSession();
+Session new_session() {
+    Process *running = process::current();
+    return running->new_session();
 }
 
-void ReleaseSession(session_t session) {
-    Running()->ReleaseSession(session);
+void release_session(session_t session) {
+    current()->release_session(session);
 }
 
-message::Content Request(process_t pid, message::Content content) {
-    Process *running = Running();
+message::Content request(process_t pid, message::Content content) {
+    Process *running = current();
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
     }
-    if (Process *p = Find(pid)) {
-        Session session = running->NewSession();
-        p->PushMessage(message::New(running->Pid(), session.Value(), content));
-        process::Unref(p);
-        return running->Suspend(session.Value());
+    if (Process *p = find(pid)) {
+        Session session = running->new_session();
+        p->push_message(message::create(running->pid(), session.Value(), content));
+        process::unref(p);
+        return running->suspend(session.Value());
     }
     throw 5;
 }
 
-void Response(process_t source, session_t session, message::Content content) {
-    if (Process *running = process::Running()) {
-        running->Response(source, session, std::move(content));
-    } else if (Process *p = Find(source)) {
-        p->PushMessage(message::New(process_t(), sessionForResponse(session), std::move(content)));
-        process::Unref(p);
+void response(process_t source, session_t session, message::Content content) {
+    if (Process *running = process::current()) {
+        running->response(source, session, std::move(content));
+    } else if (Process *p = find(source)) {
+        p->push_message(message::create(process_t(), sessionForResponse(session), std::move(content)));
+        process::unref(p);
     }
 }
 
-void Send(process_t pid, message::Content content) {
-    Send(pid, session_t(), std::move(content));
+void send(process_t pid, message::Content content) {
+    send(pid, session_t(), std::move(content));
 }
 
-void Send(process_t pid, session_t session, message::Content content) {
-    if (Process *p = Find(pid)) {
-        p->PushMessage(message::New(Pid(), session, std::move(content)));
+void send(process_t pid, session_t session, message::Content content) {
+    if (Process *p = find(pid)) {
+        p->push_message(message::create(self(), session, std::move(content)));
     }
 }
 
-void Yield() {
-    auto running = process::Running();
+void yield() {
+    auto running = process::current();
     assert(running != nullptr);
-    running->Yield();
+    running->yield();
 }
 
 Session::Session(session_t session)
-    : Session(reinterpret_cast<uintptr>(process::Running()), session) {
+    : Session(reinterpret_cast<uintptr>(process::current()), session) {
 }
 
 Session::Session(uintptr process, session_t session)
@@ -1001,47 +999,47 @@ Session::Session(uintptr process, session_t session)
 
 process_t Session::Pid() const {
     auto p = reinterpret_cast<Process*>(_process);
-    return p->Pid();
+    return p->pid();
 }
 
 void Session::close() {
     auto p = reinterpret_cast<Process*>(_process);
-    p->ReleaseSession(_session);
+    p->release_session(_session);
 }
 
 }
 
 namespace coroutine {
 
-void Spawn(std::function<void()> func, size_t addstack) {
-    auto p = process::Running();
+void spawn(std::function<void()> func, size_t addstack) {
+    auto p = process::current();
     assert(p == nullptr);
-    p->Spawn(std::move(func), addstack);
+    p->spawn(std::move(func), addstack);
 }
 
-void Timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
-    Spawn([msecs, func = std::move(func)] {
-        Sleep(msecs);
+void timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
+    spawn([msecs, func = std::move(func)] {
+        sleep(msecs);
         func();
     }, addstack);
 }
 
 void
-Wakeup(Coroutine *co) {
-    auto p = process::Running();
+wakeup(Coroutine *co) {
+    auto p = process::current();
     assert(p != nullptr);
-    p->Wakeup(co);
+    p->wakeup(co);
 }
 
 namespace detail {
 
 void enroll(Condition *c) {
-    auto p = process::Running();
+    auto p = process::current();
     p->enroll(c);
 }
 
 void delist(Condition *c) {
-    auto p = process::Running();
+    auto p = process::current();
     p->delist(c);
 }
 
@@ -1057,10 +1055,10 @@ struct Worker {
 public:
 
     Worker() {
-        _thread = std::thread(std::mem_fn(&Worker::Run), this);
+        _thread = std::thread(std::mem_fn(&Worker::run), this);
     }
 
-    void Queue(Process *p) {
+    void push(Process *p) {
         if (p == nullptr) {
             return;
         }
@@ -1069,13 +1067,13 @@ public:
 
 private:
 
-    void Run() {
+    void run() {
         for (;;) {
             auto p = _queue.take();
             if (p == nullptr) {
                 break;
             }
-            process::Resume(p);
+            process::resume(p);
         }
     }
 
@@ -1086,17 +1084,17 @@ private:
 static class {
 public:
 
-    void Start(size_t n) {
+    void start(size_t n) {
         n = std::max(size_t(2), n);
         _n = n;
         _workers = new Worker[n];
     }
 
-    void Resume(Process *p) {
-        process::Ref(p);
+    void resume(Process *p) {
+        process::ref(p);
         uintptr randval = reinterpret_cast<uintptr>(p) + reinterpret_cast<uintptr>(&p);
         size_t index = ((randval >> 4) + (randval >> 16))%_n;
-        _workers[index].Queue(p);
+        _workers[index].push(p);
     }
 
 private:
@@ -1104,13 +1102,13 @@ private:
     Worker *_workers;
 } scheduler;
 
-static void Resume(Process *p) {
-    scheduler.Resume(p);
+static void resume(Process *p) {
+    scheduler.resume(p);
 }
 
 static void init() {
     unsigned n = std::thread::hardware_concurrency();
-    scheduler.Start(static_cast<size_t>(n));
+    scheduler.start(static_cast<size_t>(n));
 }
 
 static wild::module::Definition sched(module::STP, "stp::sched", init, module::Order::Sched);
