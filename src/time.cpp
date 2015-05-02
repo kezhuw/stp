@@ -4,8 +4,8 @@
 #include "process.hpp"
 #include "module.hpp"
 
-#include <wild/any.hpp>
-#include <wild/freelist.hpp>
+#include <wild/Any.hpp>
+#include <wild/FreeList.hpp>
 #include <wild/module.hpp>
 
 #include <assert.h>

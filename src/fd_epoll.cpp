@@ -6,7 +6,7 @@
 
 #include <wild/module.hpp>
 #include <wild/string.hpp>
-#include <wild/scope_guard.hpp>
+#include <wild/ScopeGuard.hpp>
 
 #include <signal.h>
 #include <unistd.h>

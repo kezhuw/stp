@@ -5,7 +5,7 @@
 
 #include <wild/module.hpp>
 #include <wild/string.hpp>
-#include <wild/misc.hpp>
+#include <wild/utility.hpp>
 
 #include <sys/types.h>
 #include <sys/event.h>

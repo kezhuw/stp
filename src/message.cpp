@@ -1,7 +1,7 @@
 #include "message.hpp"
 
-#include <wild/freelist.hpp>
-#include <wild/spinlock.hpp>
+#include <wild/FreeList.hpp>
+#include <wild/SpinLock.hpp>
 #include <wild/with_lock.hpp>
 
 #include <cstdlib>

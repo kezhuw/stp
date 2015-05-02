@@ -2,9 +2,9 @@
 
 #include "types.hpp"
 
-#include <wild/any.hpp>
+#include <wild/Any.hpp>
 #include <wild/types.hpp>
-#include <wild/spinlock.hpp>
+#include <wild/SpinLock.hpp>
 #include <wild/with_lock.hpp>
 #include <wild/utility.hpp>
 

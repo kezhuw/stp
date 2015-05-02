@@ -5,10 +5,9 @@
 
 #include <wild/likely.hpp>
 #include <wild/types.hpp>
-#include <wild/fd.hpp>
 #include <wild/io.hpp>
 #include <wild/string.hpp>
-#include <wild/scope_guard.hpp>
+#include <wild/ScopeGuard.hpp>
 
 #include <sys/ioctl.h>
 #include <sys/socket.h>

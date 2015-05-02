@@ -5,7 +5,6 @@
 #include <wild/errno.hpp>
 #include <wild/types.hpp>
 #include <wild/io.hpp>
-#include <wild/scope_guard.hpp>
 
 #include <assert.h>
 

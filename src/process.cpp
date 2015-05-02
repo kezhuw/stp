@@ -11,9 +11,8 @@
 #include <wild/types.hpp>
 #include <wild/likely.hpp>
 #include <wild/with_lock.hpp>
-#include <wild/scope_guard.hpp>
-#include <wild/forward_list.hpp>
-#include <wild/id_allocator.hpp>
+#include <wild/ScopeGuard.hpp>
+#include <wild/IdAllocator.hpp>
 #include <wild/utility.hpp>
 
 #include <ucontext.h>

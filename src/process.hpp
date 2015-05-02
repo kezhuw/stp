@@ -4,8 +4,7 @@
 #include "message.hpp"
 
 #include <wild/types.hpp>
-#include <wild/spinlock.hpp>
-#include <wild/forward_list.hpp>
+#include <wild/SpinLock.hpp>
 
 #include <memory>
 #include <system_error>
