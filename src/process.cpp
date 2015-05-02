@@ -979,6 +979,7 @@ void send(process_t pid, message::Content content) {
 void send(process_t pid, session_t session, message::Content content) {
     if (Process *p = find(pid)) {
         p->push_message(message::create(self(), session, std::move(content)));
+        process::unref(p);
     }
 }
 
