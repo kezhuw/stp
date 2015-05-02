@@ -26,6 +26,7 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -539,13 +540,19 @@ static bool unreg(process_t pid) {
     }
 }
 
-static Process *find(process_t pid) {
+struct ProcessDeleter {
+    void operator()(Process *p) const noexcept {
+        process::unref(p);
+    }
+};
+
+using ProcessUniquePtr = std::unique_ptr<Process, ProcessDeleter>;
+
+static ProcessUniquePtr find(process_t pid) {
     WITH_LOCK(gProcsLocker) {
         auto it = gProcsMap.find(pid.Value());
         if (it != gProcsMap.end()) {
-            Process *p = it->second;
-            process::ref(p);
-            return p;
+            return ProcessUniquePtr(it->second);
         }
     }
     return nullptr;
@@ -735,9 +742,8 @@ public:
     }
 
     void response(process_t source, session_t session, message::Content content) {
-        if (Process *p = find(source)) {
+        if (auto p = find(source)) {
             p->push_message(message::create(pid(), sessionForResponse(session), std::move(content)));
-            process::unref(p);
         }
         close_request(source, session);
     }
@@ -930,9 +936,8 @@ void kill(process_t pid) {
     if (pid == process_t(0)) {
         pid = selfPid;
     }
-    if (Process *p = find(pid)) {
+    if (auto p = find(pid)) {
         p->push_message(message::create(selfPid, session_t(), KillProcess{}));
-        process::unref(p);
     }
 }
 
@@ -954,10 +959,10 @@ message::Content request(process_t pid, message::Content content) {
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
     }
-    if (Process *p = find(pid)) {
+    if (auto p = find(pid)) {
         Session session = running->new_session();
         p->push_message(message::create(running->pid(), session.Value(), content));
-        process::unref(p);
+        p.reset();
         return running->suspend(session.Value());
     }
     throw 5;
@@ -966,9 +971,8 @@ message::Content request(process_t pid, message::Content content) {
 void response(process_t source, session_t session, message::Content content) {
     if (Process *running = process::current()) {
         running->response(source, session, std::move(content));
-    } else if (Process *p = find(source)) {
+    } else if (auto p = find(source)) {
         p->push_message(message::create(process_t(), sessionForResponse(session), std::move(content)));
-        process::unref(p);
     }
 }
 
@@ -977,9 +981,8 @@ void send(process_t pid, message::Content content) {
 }
 
 void send(process_t pid, session_t session, message::Content content) {
-    if (Process *p = find(pid)) {
+    if (auto p = find(pid)) {
         p->push_message(message::create(self(), session, std::move(content)));
-        process::unref(p);
     }
 }
 
