@@ -552,7 +552,9 @@ static ProcessUniquePtr find(process_t pid) {
     WITH_LOCK(gProcsLocker) {
         auto it = gProcsMap.find(pid.Value());
         if (it != gProcsMap.end()) {
-            return ProcessUniquePtr(it->second);
+            auto p = it->second;
+            process::ref(p);
+            return ProcessUniquePtr(p);
         }
     }
     return nullptr;
