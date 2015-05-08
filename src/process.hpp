@@ -71,9 +71,6 @@ process_t spawn(Closure&& closure, size_t addstack = 0) {
 
 message::Content suspend(session_t);
 
-// relinquish CPU
-void yield();
-
 process_t self();
 
 void exit();

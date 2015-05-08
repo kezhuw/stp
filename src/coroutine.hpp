@@ -13,6 +13,9 @@ void timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
 
 void sleep(uint64 msecs);
 
+// relinquish CPU
+void yield();
+
 void exit();
 
 class Mutex {

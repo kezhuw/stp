@@ -988,12 +988,6 @@ void send(process_t pid, session_t session, message::Content content) {
     }
 }
 
-void yield() {
-    auto running = process::current();
-    assert(running != nullptr);
-    running->yield();
-}
-
 Session::Session(session_t session)
     : Session(reinterpret_cast<uintptr>(process::current()), session) {
 }
@@ -1027,6 +1021,12 @@ void timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
         sleep(msecs);
         func();
     }, addstack);
+}
+
+void yield() {
+    auto p = process::current();
+    assert(p != nullptr);
+    p->yield();
 }
 
 void
