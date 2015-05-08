@@ -134,30 +134,6 @@ private:
 
 Session new_session();
 
-struct Error {
-    enum : uintptr {
-        None                = 0,
-        RuntimeError        = 1,
-        LocalNotExist       = 2,
-        RemoteNotExist      = 3,
-        UnknownMessage      = 4,
-    } Value;
-
-    /* implicit */ Error(decltype(Value) value = None) : Value(value) {}
-
-    explicit operator bool() {
-        return Value != None;
-    }
-};
-
-inline bool operator==(Error a, Error b) {
-    return a.Value == b.Value;
-}
-
-inline bool operator!=(Error a, Error b) {
-    return !(a==b);
-}
-
 void send(process_t pid, message::Content content);
 void send(process_t pid, session_t session, message::Content content);
 message::Content request(process_t pid, message::Content content);
