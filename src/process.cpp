@@ -44,6 +44,7 @@ namespace sched { static void resume(Process *); }
 
 struct KillProcess {};
 struct AbortedRequest {};
+struct ProcessNotExist {};
 
 enum class MessageType {
     kNotify     = 0,
@@ -961,13 +962,13 @@ message::Content request(process_t pid, message::Content content) {
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
     }
+    Session session = running->new_session();
     if (auto p = find(pid)) {
-        Session session = running->new_session();
         p->push_message(message::create(running->pid(), session.Value(), content));
-        p.reset();
-        return running->suspend(session.Value());
+    } else {
+        running->push_message(message::create(pid, sessionForResponse(session.Value()), std::make_exception_ptr(ProcessNotExist{})));
     }
-    throw 5;
+    return running->suspend(session.Value());
 }
 
 void response(process_t source, session_t session, message::Content content) {
