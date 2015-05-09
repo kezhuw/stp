@@ -712,8 +712,8 @@ public:
             case MessageType::kResponse: {
                 uint32 session = -msg->session.Value();
                 if (Coroutine *co = unblock(session_t(session))) {
-                    if (msg->content.type() == typeid(AbortedRequest)) {
-                        co->set_exception(std::make_exception_ptr(RequestAborted{}));
+                    if (auto *e = wild::Any::Cast<std::exception_ptr>(&msg->content)) {
+                        co->set_exception(*e);
                     } else {
                         co->set_result(std::move(msg->content));
                     }
@@ -806,7 +806,7 @@ public:
     }
 
     void abort_request(process_t source, session_t session) {
-        process::send(source, sessionForResponse(session), AbortedRequest{});
+        process::send(source, sessionForResponse(session), std::make_exception_ptr(AbortedRequest{}));
     }
 
     // XXX
