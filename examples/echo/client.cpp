@@ -5,6 +5,10 @@
 #include <wild/module.hpp>
 #include <wild/string.hpp>
 
+#include <algorithm>
+#include <atomic>
+#include <random>
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -15,32 +19,40 @@ using namespace stp;
 int
 main() {
     wild::module::Init();
+    std::atomic<size_t> seqn(0);
 
-    auto client = [] (string namestr) {
+    auto client = [&seqn] (string namestr) {
         const char *name = namestr.c_str();
-        fprintf(stderr, "%s: start\n", name);
         wild::Fd server;
         std::error_condition error;
         std::tie(server, error) = net::tcp::connect("tcp4://*:3000");
-        fprintf(stderr, "%s: connected\n", name);
         if (error) {
             printf("%s: fail to connect: %s\n", name, error.message().c_str());
             process::exit();
         }
+        printf("%s: connected.\n", name);
         byte_t data[] = u8"0123456789abcdefghijklmnopqrstuvwxyz";
-        for (int i=0; i<50000; ++i) {
+        std::random_device rd;
+        std::mt19937 g(rd());
+        for (;;) {
             int err;
+            size_t seqi = seqn.fetch_add(1, std::memory_order_relaxed);
+            std::shuffle(std::begin(data), std::prev(std::end(data)), g);
             std::tie(std::ignore, err) = io::write(server.RawFd(), data, sizeof data);
             if (err) {
-                printf("%s: io::write(): %s\n", name, wild::os::strerror(err));
+                printf("%s seq %zu: io::write(): %s\n", name, seqi, wild::os::strerror(err));
                 break;
             }
-            std::tie(std::ignore, err) = io::read_full(server.RawFd(), data, sizeof data);
+            std::array<byte_t, sizeof data> buf;
+            std::tie(std::ignore, err) = io::read_full(server.RawFd(), buf.data(), buf.size());
             if (err) {
-                printf("%s: io::read_full(): %s\n", name, wild::os::strerror(err));
+                printf("%s seq %zu: io::read_full(): %s\n", name, seqi, wild::os::strerror(err));
                 break;
             }
-            coroutine::sleep(500);
+            printf("%s seq %zu: ==> %s.\n"
+                   "%s seq %zu: <== %s.\n",
+                   name, seqi, reinterpret_cast<char*>(data),
+                   name, seqi, reinterpret_cast<char*>(buf.data()));
         }
     };
 
