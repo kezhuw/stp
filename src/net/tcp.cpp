@@ -58,7 +58,7 @@ public:
         return "stp_net";
     }
 
-    virtual std::string message(int condition) const noexcept {
+    virtual std::string message(int condition) const noexcept override {
         switch (static_cast<net_errc>(condition)) {
         case net_errc::illegal_address:
             return "illegal address format";
@@ -82,7 +82,7 @@ public:
         return "stp_gai";
     }
 
-    virtual std::string message(int condition) const noexcept {
+    virtual std::string message(int condition) const noexcept override {
         const char *strerr = gai_strerror(condition);
         if (strerr == nullptr) {
             return "unknown error";
