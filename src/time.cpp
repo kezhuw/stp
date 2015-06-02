@@ -60,16 +60,16 @@ _list_clear(struct timer_list *l) {
     return list;
 }
 
-#define TIME_LEAST_SHIFT    14
-#define TIME_LEAST_VALUE    (1<<TIME_LEAST_SHIFT)
-#define TIME_LEAST_MASK        (TIME_LEAST_VALUE-1)
+#define TIME_LEAST_SHIFT        14
+#define TIME_LEAST_VALUE        (1<<TIME_LEAST_SHIFT)
+#define TIME_LEAST_MASK         (TIME_LEAST_VALUE-1)
 
-#define TIME_LEVEL_SHIFT    10
-#define TIME_LEVEL_VALUE    (1<<TIME_LEVEL_SHIFT)
-#define TIME_LEVEL_MASK        (TIME_LEVEL_VALUE-1)
+#define TIME_LEVEL_SHIFT        10
+#define TIME_LEVEL_VALUE        (1<<TIME_LEVEL_SHIFT)
+#define TIME_LEVEL_MASK         (TIME_LEVEL_VALUE-1)
 
-#define TIME_BITS        (CHAR_BIT*(int)sizeof(uint64))
-#define TIME_LEVEL_COUNT    ((TIME_BITS-TIME_LEAST_SHIFT)/TIME_LEVEL_SHIFT)
+#define TIME_BITS               (CHAR_BIT*(int)sizeof(uint64))
+#define TIME_LEVEL_COUNT        ((TIME_BITS-TIME_LEAST_SHIFT)/TIME_LEVEL_SHIFT)
 
 static_assert(TIME_BITS == TIME_LEVEL_COUNT*TIME_LEVEL_SHIFT + TIME_LEAST_SHIFT, "time bits mismatch");
 
