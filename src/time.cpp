@@ -25,13 +25,11 @@ namespace {
 using namespace stp;
 using namespace stp::time;
 
-#define FIRST_NODE_FIELD    struct timer_node *link
-
 using pid_t = decltype(std::declval<process_t>().Value());
 using sid_t = decltype(std::declval<session_t>().Value());
 
 struct timer_node {
-    FIRST_NODE_FIELD;
+    struct timer_node *next;
     uint64 expire;
     // user data
     pid_t source;
@@ -39,33 +37,30 @@ struct timer_node {
 };
 
 struct timer_list {
-    struct _unused {
-        FIRST_NODE_FIELD = nullptr;
-    } dummy;
-    struct timer_node *tail = reinterpret_cast<timer_node*>(&dummy);
+    struct timer_node *first;
+    struct timer_node **last = &first;
 };
 
 inline void
 _list_init(struct timer_list *l) {
-    l->dummy.link = NULL;
-    l->tail = (struct timer_node *)&l->dummy;
+    l->last = &l->first;
 }
 
 inline bool
 _list_empty(struct timer_list *l) {
-    return l->dummy.link == NULL;
+    return l->last == &l->first;
 }
 
 inline void
 _list_append(struct timer_list *l, struct timer_node *n) {
-    l->tail->link = n;
-    l->tail = n;
+    *(l->last) = n;
+    l->last = &n->next;
 }
 
 inline struct timer_node *
 _list_clear(struct timer_list *l) {
-    l->tail->link = NULL;
-    struct timer_node *nodes = l->dummy.link;
+    *(l->last) = nullptr;
+    auto nodes = l->first;
     _list_init(l);
     return nodes;
 }
@@ -141,7 +136,7 @@ _tick(struct Timer *t) {
         struct timer_node *list = _list_clear(&t->least[index]);
         do {
             struct timer_node *node = list;
-            list = list->link;
+            list = list->next;
 
             _send(node->source, node->session);
             _free_node(t, node);
@@ -159,7 +154,7 @@ _tick(struct Timer *t) {
                 struct timer_node *list = _list_clear(&t->level[level][value-1]);
                 while (list != NULL) {
                     struct timer_node *node = list;
-                    list = list->link;
+                    list = list->next;
                     _queue(t, node);
                 }
                 break;
