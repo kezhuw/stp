@@ -46,11 +46,6 @@ _list_init(struct timer_list *l) {
     l->last = &l->first;
 }
 
-inline bool
-_list_empty(struct timer_list *l) {
-    return l->last == &l->first;
-}
-
 inline void
 _list_append(struct timer_list *l, struct timer_node *n) {
     *(l->last) = n;
@@ -60,9 +55,9 @@ _list_append(struct timer_list *l, struct timer_node *n) {
 inline struct timer_node *
 _list_clear(struct timer_list *l) {
     *(l->last) = nullptr;
-    auto nodes = l->first;
+    auto list = l->first;
     _list_init(l);
-    return nodes;
+    return list;
 }
 
 #define TIME_LEAST_SHIFT    14
@@ -104,6 +99,16 @@ _send(pid_t pid, sid_t session) {
 }
 
 void
+_send_list(struct Timer *t, struct timer_node *list) {
+    while (list != nullptr) {
+        struct timer_node *node = list;
+        list = list->next;
+        _send(node->source, node->session);
+        _free_node(t, node);
+    }
+}
+
+void
 _queue(struct Timer *t, struct timer_node *node) {
     uint64 time = t->time;
     uint64 expire = node->expire;
@@ -129,19 +134,19 @@ _queue(struct Timer *t, struct timer_node *node) {
 }
 
 void
+_queue_list(struct Timer *t, struct timer_node *list) {
+    while (list != nullptr) {
+        struct timer_node *n = list;
+        list = list->next;
+        _queue(t, n);
+    }
+}
+
+void
 _tick(struct Timer *t) {
     uint64 index = t->time & TIME_LEAST_MASK;
 
-    if (!_list_empty(&t->least[index])) {
-        struct timer_node *list = _list_clear(&t->least[index]);
-        do {
-            struct timer_node *node = list;
-            list = list->next;
-
-            _send(node->source, node->session);
-            _free_node(t, node);
-        } while (list != NULL);
-    }
+    _send_list(t, _list_clear(&t->least[index]));
 
     uint64 time = ++t->time;
     if ((time & TIME_LEAST_MASK) == 0) {
@@ -150,16 +155,12 @@ _tick(struct Timer *t) {
         uint64 level=0;
         do {
             uint64 value = time & TIME_LEVEL_MASK;
-            if (value != 0) {
-                struct timer_node *list = _list_clear(&t->level[level][value-1]);
-                while (list != NULL) {
-                    struct timer_node *node = list;
-                    list = list->next;
-                    _queue(t, node);
-                }
-                break;
+            if (value == 0) {
+                time >>= TIME_LEVEL_SHIFT;
+                continue;
             }
-            time >>= TIME_LEVEL_SHIFT;
+            _queue_list(t, _list_clear(&t->level[level][value-1]));
+            break;
         } while (++level < TIME_LEVEL_COUNT);
         assert(level < TIME_LEVEL_COUNT);
     }
