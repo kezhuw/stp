@@ -5,6 +5,7 @@
 #include "coroutine.hpp"
 #include "time.hpp"
 
+#include <wild/AppendList.hpp>
 #include <wild/BlockingQueue.hpp>
 #include <wild/exception.hpp>
 #include <wild/module.hpp>
@@ -12,6 +13,7 @@
 #include <wild/likely.hpp>
 #include <wild/with_lock.hpp>
 #include <wild/ScopeGuard.hpp>
+#include <wild/Signaler.hpp>
 #include <wild/IdAllocator.hpp>
 #include <wild/utility.hpp>
 
@@ -868,6 +870,9 @@ private:
 
     friend void ref(Process *p);
     friend void unref(Process *p);
+
+public:
+    Process *next;
 };
 
 void loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
@@ -1055,57 +1060,74 @@ void delist(Condition *c) {
 
 namespace sched {
 
-using ProcessQueue = wild::BlockingQueue<process::Process*, wild::SpinLock>;
-
-struct Worker {
+static class Scheduler {
 public:
 
-    Worker() {
-        _thread = std::thread(std::mem_fn(&Worker::run), this);
+    void start(size_t n) {
+        n = std::max(size_t(2), n);
+        for (size_t i=0; i<n; ++i) {
+            _threads.emplace_back(&Scheduler::run, this);
+        }
     }
 
-    void push(Process *p) {
-        if (p == nullptr) {
-            return;
+    void stop() {
+        _stop.store(std::memory_order_seq_cst);
+        for (size_t i=0, n=_threads.size(); i<n; ++i) {
+            _signaler.send();
         }
-        _queue.push(p);
+        for (auto& td : _threads) {
+            td.join();
+        }
+    }
+
+    void resume(Process *p) {
+        process::ref(p);
+        bool waiting = false;
+        WITH_LOCK(_resumeq_lock) {
+            _resumeq.push(p);
+            if (_idle_workers != 0) {
+                waiting = true;
+                --_idle_workers;
+            }
+        }
+        if (waiting) {
+            _signaler.send();
+        }
     }
 
 private:
 
     void run() {
-        for (;;) {
-            auto p = _queue.take();
-            if (p == nullptr) {
-                break;
+        while (!_stop.load(std::memory_order_relaxed)) {
+            Process *p;
+            WITH_LOCK(_runq_lock) {
+                if (_runq == nullptr) {
+                    WITH_LOCK(_resumeq_lock) {
+                        _runq = _resumeq.clear();
+                        if (_runq == nullptr) {
+                            ++_idle_workers;
+                        }
+                    }
+                    if (_runq == nullptr) {
+                        _signaler.wait(_runq_lock);
+                        continue;
+                    }
+                }
+                p = _runq;
+                _runq = p->next;
             }
             process::resume(p);
         }
     }
 
-    ProcessQueue _queue;
-    std::thread _thread;
-};
-
-static class {
-public:
-
-    void start(size_t n) {
-        n = std::max(size_t(2), n);
-        _n = n;
-        _workers = new Worker[n];
-    }
-
-    void resume(Process *p) {
-        process::ref(p);
-        uintptr randval = reinterpret_cast<uintptr>(p) + reinterpret_cast<uintptr>(&p);
-        size_t index = ((randval >> 4) + (randval >> 16))%_n;
-        _workers[index].push(p);
-    }
-
-private:
-    size_t _n;
-    Worker *_workers;
+    std::atomic<bool> _stop;
+    std::vector<std::thread> _threads;
+    wild::SpinLock _runq_lock;
+    Process *_runq;
+    wild::SpinLock _resumeq_lock;
+    wild::AppendList<Process, &Process::next> _resumeq;
+    int _idle_workers;
+    wild::Signaler _signaler;
 } scheduler;
 
 static void resume(Process *p) {
