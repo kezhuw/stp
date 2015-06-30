@@ -2,7 +2,6 @@
 #include "message.hpp"
 #include "module.hpp"
 #include "context.hpp"
-#include "coroutine.hpp"
 #include "time.hpp"
 
 #include <wild/AppendList.hpp>
@@ -38,11 +37,7 @@
 #include <unistd.h>
 
 namespace stp {
-
-using Process = process::Process;
-using Coroutine = coroutine::Coroutine;
-
-namespace sched { static void resume(Process *); }
+namespace process {
 
 struct KillProcess {};
 struct AbortedRequest {};
@@ -68,13 +63,20 @@ MessageType typeOfMessage(message::Message *msg) {
     return MessageType::kNotify;
 }
 
+class Process;
+class Coroutine;
+
+namespace sched { static void resume(Process *); }
+
+void wakeup(Coroutine *co);
+
 namespace coroutine {
 
-static thread_local context::Context *tContext = context::create();
-static thread_local stp::coroutine::Coroutine *tCoroutine;
+static thread_local Coroutine *tCoroutine;
 
 context::Context *
 thread_context() {
+    static thread_local context::Context *tContext = context::create();
     return tContext;
 }
 
@@ -90,17 +92,6 @@ set_running(Coroutine *co) {
 
 message::Content suspend();
 
-class Scope {
-public:
-    Scope(Coroutine *co) {
-        // assert(current() == nullptr);
-        set_running(co);
-    }
-    ~Scope() {
-        set_running(nullptr);
-    }
-};
-
 struct ExitException : public std::exception {
     virtual const char *what() const noexcept final override {
         return "coroutine::ExitException";
@@ -108,58 +99,6 @@ struct ExitException : public std::exception {
 };
 
 }
-
-namespace process {
-
-static thread_local Process *tProcess;
-
-Process *
-current() {
-    return tProcess;
-}
-
-void
-set_running(Process *p) {
-    tProcess = p;
-}
-
-class Scope {
-public:
-    Scope(Process *p) {
-        assert(current() == nullptr);
-        set_running(p);
-    }
-    ~Scope() {
-        set_running(nullptr);
-    }
-};
-
-struct ExitException : public std::exception {
-    virtual const char *what() const noexcept final override {
-        return "process::ExitException";
-    }
-};
-
-struct RequestAborted : public std::exception {
-    virtual const char *what() const noexcept final override {
-        return "process::RequestAborted";
-    }
-};
-
-struct KillException : public std::exception {
-    KillException(process_t killer) : Killer(killer) {}
-    const process_t Killer;
-    virtual const char *what() const noexcept final override {
-        return "process::KillException";
-    }
-};
-
-void ref(Process *);
-void unref(Process *);
-
-}
-
-namespace coroutine {
 
 class Result {
 public:
@@ -213,7 +152,16 @@ public:
     }
 
     void resume() {
-        coroutine::Scope enter(this);
+        class Scope {
+        public:
+            Scope(Coroutine *co) {
+                // assert(current() == nullptr);
+                coroutine::set_running(co);
+            }
+            ~Scope() {
+                coroutine::set_running(nullptr);
+            }
+        } enter(this);
         context::transfer(coroutine::thread_context(), _context);
     }
 
@@ -251,25 +199,51 @@ private:
     std::function<void()> _function;
 };
 
-void wakeup(Coroutine *co);
+static thread_local Process *tProcess;
 
-void sleep(uint64 msecs) {
-    time::sleep(msecs);
+Process *
+current() {
+    return tProcess;
 }
 
-void exit() {
-    Coroutine *running = current();
-    assert(running != nullptr);
-    throw coroutine::ExitException();
+void
+set_running(Process *p) {
+    tProcess = p;
 }
 
-message::Content suspend() {
-    Coroutine *running = current();
-    assert(running != nullptr);
-    context::transfer(running->context(), coroutine::thread_context());
-    assert(running == current());
-    return running->get_result();
-}
+class Scope {
+public:
+    Scope(Process *p) {
+        assert(current() == nullptr);
+        set_running(p);
+    }
+    ~Scope() {
+        set_running(nullptr);
+    }
+};
+
+struct ExitException : public std::exception {
+    virtual const char *what() const noexcept final override {
+        return "process::ExitException";
+    }
+};
+
+struct RequestAborted : public std::exception {
+    virtual const char *what() const noexcept final override {
+        return "process::RequestAborted";
+    }
+};
+
+struct KillException : public std::exception {
+    KillException(process_t killer) : Killer(killer) {}
+    const process_t Killer;
+    virtual const char *what() const noexcept final override {
+        return "process::KillException";
+    }
+};
+
+void ref(Process *);
+void unref(Process *);
 
 namespace detail {
 
@@ -317,7 +291,7 @@ void Mutex::unref(Mutex* m) {
 }
 
 void Mutex::lock() {
-    auto running = current();
+    auto running = coroutine::current();
     assert(running != nullptr);
     if (_coroutines.empty()) {
         _coroutines.push_back(running);
@@ -337,7 +311,7 @@ void Mutex::lock() {
 
 bool Mutex::try_lock() {
     if (_coroutines.empty()) {
-        auto running = current();
+        auto running = coroutine::current();
         assert(running != nullptr);
         _coroutines.push_back(running);
         return true;
@@ -346,14 +320,14 @@ bool Mutex::try_lock() {
 }
 
 void Mutex::unlock() {
-    auto running_ = current();
+    auto running_ = coroutine::current();
     assert(running_ != nullptr);
     assert(!_coroutines.empty());
     assert(_coroutines.front() == running_);
     _coroutines.pop_front();
     if (!_coroutines.empty()) {
         auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
-        coroutine::wakeup(pending);
+        process::wakeup(pending);
     }
 }
 
@@ -390,6 +364,7 @@ void delist(Condition *c);
 Condition* Condition::create() {
     auto c = new Condition;
     c->_refcnt = 1;
+    enroll(c);
     return c;
 }
 
@@ -403,12 +378,13 @@ void Condition::unref(Condition *c) {
     c->_refcnt -= 1;
     if (c->_refcnt == 0) {
         assert(c->_coroutines.empty());
+        delist(c);
         delete c;
     }
 }
 
 void Condition::wait(Mutex& locker) {
-    auto running = current();
+    auto running = coroutine::current();
     assert(running != nullptr);
     locker.unlock();
     _coroutines.push_back(running);
@@ -432,13 +408,13 @@ void Condition::wait(Mutex& locker, std::function<bool()> pred) {
 void Condition::notify_one() {
     if (!_coroutines.empty()) {
         auto pending = wild::take_front(_coroutines);
-        coroutine::wakeup(pending);
+        process::wakeup(pending);
     }
 }
 
 void Condition::notify_all() {
     for (auto pending : _coroutines) {
-        coroutine::wakeup(pending);
+        process::wakeup(pending);
     }
     _coroutines.clear();
 }
@@ -446,7 +422,7 @@ void Condition::notify_all() {
 void Condition::interrupt_all(std::exception_ptr e) {
     for (auto pending : _coroutines) {
         pending->set_exception(e);
-        coroutine::wakeup(pending);
+        process::wakeup(pending);
     }
     _coroutines.clear();
 }
@@ -519,10 +495,6 @@ void Condition::notify_all() {
     auto c = reinterpret_cast<detail::Condition*>(_opaque);
     c->notify_all();
 }
-
-}
-
-namespace process {
 
 static wild::SpinLock gProcsLocker;
 static std::unordered_map<uint32, Process*> gProcsMap;
@@ -819,11 +791,11 @@ public:
         delete p;
     }
 
-    void enroll(coroutine::detail::Condition *c) {
+    void enroll(detail::Condition *c) {
         _condvars.insert(c);
     }
 
-    void delist(coroutine::detail::Condition *c) {
+    void delist(detail::Condition *c) {
         _condvars.erase(c);
     }
 
@@ -866,7 +838,7 @@ private:
     std::deque<Coroutine*> _wakeup_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
-    std::unordered_set<coroutine::detail::Condition*> _condvars;
+    std::unordered_set<detail::Condition*> _condvars;
 
     friend void ref(Process *p);
     friend void unref(Process *p);
@@ -874,6 +846,12 @@ private:
 public:
     Process *next;
 };
+
+void wakeup(Coroutine *co) {
+    auto p = process::current();
+    assert(p != nullptr);
+    p->wakeup(co);
+}
 
 void loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
     process::current()->loop(std::move(callback));
@@ -1012,6 +990,18 @@ void Session::close() {
     p->release_session(_session);
 }
 
+namespace detail {
+
+void enroll(Condition *c) {
+    auto p = process::current();
+    p->enroll(c);
+}
+
+void delist(Condition *c) {
+    auto p = process::current();
+    p->delist(c);
+}
+
 }
 
 namespace coroutine {
@@ -1020,6 +1010,10 @@ void spawn(std::function<void()> func, size_t addstack) {
     auto p = process::current();
     assert(p == nullptr);
     p->spawn(std::move(func), addstack);
+}
+
+void sleep(uint64 msecs) {
+    time::sleep(msecs);
 }
 
 void timeout(uint64 msecs, std::function<void()> func, size_t addstack) {
@@ -1035,25 +1029,18 @@ void yield() {
     p->yield();
 }
 
-void
-wakeup(Coroutine *co) {
-    auto p = process::current();
-    assert(p != nullptr);
-    p->wakeup(co);
+void exit() {
+    Coroutine *running = current();
+    assert(running != nullptr);
+    throw coroutine::ExitException();
 }
 
-namespace detail {
-
-void enroll(Condition *c) {
-    auto p = process::current();
-    p->enroll(c);
-}
-
-void delist(Condition *c) {
-    auto p = process::current();
-    p->delist(c);
-}
-
+message::Content suspend() {
+    Coroutine *running = current();
+    assert(running != nullptr);
+    context::transfer(running->context(), coroutine::thread_context());
+    assert(running == current());
+    return running->get_result();
 }
 
 }
@@ -1143,4 +1130,5 @@ static wild::module::Definition sched(module::STP, "stp::sched", init, module::O
 
 }
 
+}
 }

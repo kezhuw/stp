@@ -8,8 +8,6 @@ using namespace wild::types;
 
 namespace process {
 
-class Process;
-
 struct process_t {
     constexpr explicit process_t(uint32 value = 0)
         : _value(value) {}
@@ -60,16 +58,12 @@ inline bool operator!=(session_t const& a, session_t const& b) {
 
 }
 
-namespace coroutine { class Coroutine; }
-
 namespace message { struct Message; }
 
 using process_t = process::process_t;
 using session_t = process::session_t;
 
-using Process = process::Process;
 using Message = message::Message;
-using Coroutine = coroutine::Coroutine;
 
 }
 
