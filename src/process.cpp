@@ -1008,7 +1008,7 @@ namespace coroutine {
 
 void spawn(std::function<void()> func, size_t addstack) {
     auto p = process::current();
-    assert(p == nullptr);
+    assert(p != nullptr);
     p->spawn(std::move(func), addstack);
 }
 
