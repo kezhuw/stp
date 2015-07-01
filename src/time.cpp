@@ -195,13 +195,13 @@ struct TimeoutMessage {
 void
 _main() {
     struct Timer t;
-    process::loop([&t](process_t source, session_t session, message::Content content) {
-        if (UpdateMessage *update = wild::Any::Cast<UpdateMessage>(&content)) {
-            _update(&t, update->timestamp);
-        } else if (TimeoutMessage *timeout = wild::Any::Cast<TimeoutMessage>(&content)) {
-            _timeout(&t, source, session, timeout->timeout);
-        }
+    process::request_callback<TimeoutMessage>([&t](TimeoutMessage *request) {
+        _timeout(&t, process::sender(), process::session(), request->timeout);
     });
+    process::notification_callback<UpdateMessage>([&](UpdateMessage *update) {
+        _update(&t, update->timestamp);
+    });
+    process::serve();
 }
 
 uint64

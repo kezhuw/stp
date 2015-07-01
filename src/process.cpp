@@ -142,6 +142,19 @@ public:
         _result.set_exception(e);
     }
 
+    void set_message_info(process_t sender, session_t session) noexcept {
+        _message_sender = sender;
+        _message_session = session;
+    }
+
+    process_t message_sender() noexcept {
+        return _message_sender;
+    }
+
+    session_t message_session() noexcept {
+        return _message_session;
+    }
+
     // TODO allocate from thread local coroutine pool.
     static Coroutine *create(std::function<void()> func, size_t addstack) {
         return new Coroutine(std::move(func), addstack);
@@ -195,6 +208,8 @@ private:
     }
 
     Result _result;
+    process_t _message_sender;
+    session_t _message_session;
     context::Context *_context;
     std::function<void()> _function;
 };
@@ -515,6 +530,14 @@ static bool unreg(process_t pid) {
     }
 }
 
+struct MessageDeleter {
+    void operator()(Message *m) const noexcept(noexcept(message::destroy(m))) {
+        message::destroy(m);
+    }
+};
+
+using MessageUniquePtr = std::unique_ptr<Message, MessageDeleter>;
+
 struct ProcessDeleter {
     void operator()(Process *p) const noexcept {
         process::unref(p);
@@ -740,26 +763,6 @@ public:
         return _pid;
     }
 
-    message::Message *nextMessage() {
-        Coroutine *co = coroutine::current();
-        assert(co != nullptr);
-        while (_inbox.empty()) {
-            _inbox_coroutines.push_back(co);
-            coroutine::suspend();
-        }
-        return wild::take_front(_inbox);
-    }
-
-    void loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
-        for (;;) {
-            Message *msg = nextMessage();
-            SCOPE_EXIT {
-                message::destroy(msg);
-            };
-            callback(msg->source, msg->session, std::move(msg->content));
-        }
-    }
-
     void spawn(std::function<void()> func, size_t addstack) {
         auto co = Coroutine::create(std::move(func), addstack);
         _spawn_coroutines.push_back(co);
@@ -782,6 +785,62 @@ public:
 
     void abort_request(process_t source, session_t session) {
         process::send(source, sessionForResponse(session), std::make_exception_ptr(AbortedRequest{}));
+    }
+
+    enum class HandlerMode {
+        kCallback           = 1,
+        kCoroutine          = 2,
+    };
+
+    struct HandlerInfo {
+        HandlerMode mode;
+        std::function<void(wild::Any&& content)> func;
+        size_t addstack;
+    };
+
+    void message_callback(const std::type_info& type, std::function<void(wild::Any&& content)> func) {
+        auto& handler = _message_handlers[std::type_index(type)];
+        handler.mode = HandlerMode::kCallback;
+        handler.func = std::move(func);
+        handler.addstack = 0;
+    }
+
+    void message_coroutine(const std::type_info& type, std::function<void(wild::Any&& content)> func, size_t addstack) {
+        auto& handler = _message_handlers[std::type_index(type)];
+        handler.mode = HandlerMode::kCoroutine;
+        handler.func = std::move(func);
+        handler.addstack = addstack;
+    }
+
+    message::Message *nextMessage() {
+        Coroutine *co = coroutine::current();
+        assert(co != nullptr);
+        while (_inbox.empty()) {
+            _inbox_coroutines.push_back(co);
+            coroutine::suspend();
+        }
+        return wild::take_front(_inbox);
+    }
+
+    void serve() {
+        auto running = coroutine::current();
+        for (;;) {
+            MessageUniquePtr msg(nextMessage());
+            auto it = _message_handlers.find(std::type_index(msg->content.type()));
+            if (it == _message_handlers.end()) {
+                continue;
+            }
+            const auto& handler = it->second;
+            if (handler.mode == HandlerMode::kCallback) {
+                running->set_message_info(msg->source, msg->session);
+                handler.func(std::move(msg->content));
+            } else {
+                coroutine::spawn([func = handler.func, msg = std::move(msg)] {
+                    coroutine::current()->set_message_info(msg->source, msg->session);
+                    func(std::move(msg->content));
+                }, handler.addstack);
+            }
+        }
     }
 
     // XXX
@@ -840,6 +899,8 @@ private:
     std::unordered_map<session_t, Coroutine *> _block_sessions;
     std::unordered_set<detail::Condition*> _condvars;
 
+    std::unordered_map<std::type_index, HandlerInfo> _message_handlers;
+
     friend void ref(Process *p);
     friend void unref(Process *p);
 
@@ -853,8 +914,32 @@ void wakeup(Coroutine *co) {
     p->wakeup(co);
 }
 
-void loop(std::function<void(process_t source, session_t session, message::Content&& content)> callback) {
-    process::current()->loop(std::move(callback));
+process_t sender() {
+    return coroutine::current()->message_sender();
+}
+
+session_t session() {
+    return coroutine::current()->message_session();
+}
+
+void request_callback(const std::type_info& type, std::function<void(wild::Any&& content)> handler) {
+    process::current()->message_callback(type, std::move(handler));
+}
+
+void request_coroutine(const std::type_info& type, std::function<void(wild::Any&& content)> handler, size_t addstack) {
+    process::current()->message_coroutine(type, std::move(handler), addstack);
+}
+
+void notification_callback(const std::type_info& type, std::function<void(wild::Any&& content)> handler) {
+    process::current()->message_callback(type, std::move(handler));
+}
+
+void notification_coroutine(const std::type_info& type, std::function<void(wild::Any&& content)> handler, size_t addstack) {
+    process::current()->message_coroutine(type, std::move(handler), addstack);
+}
+
+void serve() {
+    process::current()->serve();
 }
 
 void ref(Process *p) {
@@ -960,6 +1045,10 @@ void response(process_t source, session_t session, message::Content content) {
     } else if (auto p = find(source)) {
         p->push_message(message::create(process_t(), sessionForResponse(session), std::move(content)));
     }
+}
+
+void response(message::Content content) {
+    response(sender(), session(), std::move(content));
 }
 
 void send(process_t pid, message::Content content) {
