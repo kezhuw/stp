@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <queue>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -45,6 +44,7 @@ struct Message {
     process_t source;
     session_t session;
     wild::Any content;
+    struct Message *next;
 };
 
 // one reader, multiple writer, nonblocking.
@@ -54,39 +54,37 @@ struct Message {
 class Mailbox {
 public:
 
-    bool push(Message *msg) {
+    Mailbox() noexcept
+        : _wait(false) {}
+
+    bool push(Message *msg) noexcept {
         WITH_LOCK(_mutex) {
-            if (_wait) {
-                _wait = false;
-                _in.push(msg);
-                return true;
-            }
-            _out.push(msg);
+            _write.push(msg);
         }
-        return false;
+        bool expected = true;
+        return _wait.compare_exchange_strong(expected, false, std::memory_order_acq_rel);
     }
 
-    Message *take() {
-        if (_in.empty()) {
+    Message *take() noexcept {
+        if (_read == nullptr) {
             WITH_LOCK(_mutex) {
-                if (_out.empty()) {
-                    _wait = true;
+                if ((_read = _write.clear()) == nullptr) {
+                    _wait.store(true, std::memory_order_relaxed);
                     return nullptr;
                 }
-                using std::swap;
-                swap(_in, _out);
             }
         }
-        assert(!_in.empty());
-        return wild::take(_in);
+        auto msg = _read;
+        _read = msg->next;
+        return msg;
     }
 
 private:
 
+    std::atomic<bool> _wait;
     wild::SpinLock _mutex;
-    bool _wait = false;
-    std::queue<Message*> _in;
-    std::queue<Message*> _out;
+    Message *_read = nullptr;
+    wild::AppendList<Message, &Message::next> _write;
 };
 
 namespace message {
@@ -123,7 +121,7 @@ deallocMessage(Message *m) {
 
 Message *create(process_t source, session_t session, wild::Any content) {
     auto m = allocMessage();
-    return new (m) Message{source, session, content};
+    return new (m) Message{source, session, content, nullptr};
 }
 
 void destroy(Message *msg) {
