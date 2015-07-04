@@ -1,5 +1,4 @@
 #include "process.hpp"
-#include "message.hpp"
 #include "module.hpp"
 #include "context.hpp"
 #include "time.hpp"
@@ -7,6 +6,7 @@
 #include <wild/AppendList.hpp>
 #include <wild/BlockingQueue.hpp>
 #include <wild/exception.hpp>
+#include <wild/FreeList.hpp>
 #include <wild/module.hpp>
 #include <wild/types.hpp>
 #include <wild/likely.hpp>
@@ -19,11 +19,13 @@
 #include <ucontext.h>
 #include <sys/mman.h>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 
 #include <algorithm>
 #include <atomic>
+#include <queue>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -39,6 +41,98 @@
 namespace stp {
 namespace process {
 
+struct Message {
+    process_t source;
+    session_t session;
+    wild::Any content;
+};
+
+// one reader, multiple writer, nonblocking.
+// After nullptr returned from take(), reader
+// should not call take() again util notified
+// by writer.
+class Mailbox {
+public:
+
+    bool push(Message *msg) {
+        WITH_LOCK(_mutex) {
+            if (_wait) {
+                _wait = false;
+                _in.push(msg);
+                return true;
+            }
+            _out.push(msg);
+        }
+        return false;
+    }
+
+    Message *take() {
+        if (_in.empty()) {
+            WITH_LOCK(_mutex) {
+                if (_out.empty()) {
+                    _wait = true;
+                    return nullptr;
+                }
+                using std::swap;
+                swap(_in, _out);
+            }
+        }
+        assert(!_in.empty());
+        return wild::take(_in);
+    }
+
+private:
+
+    wild::SpinLock _mutex;
+    bool _wait = false;
+    std::queue<Message*> _in;
+    std::queue<Message*> _out;
+};
+
+namespace message {
+
+wild::SpinLock gMutex;
+wild::FreeList<Message> gFreeList;
+
+thread_local wild::FreeList<Message> tFreeList;
+
+Message *
+allocMessage() {
+    auto m = tFreeList.take();
+    if (m == nullptr) {
+        WITH_LOCK(gMutex) {
+            m = gFreeList.take();
+        }
+        if (m == nullptr) {
+            m = static_cast<Message*>(malloc(sizeof(Message)));
+        }
+    }
+    return m;
+}
+
+void
+deallocMessage(Message *m) {
+    if (tFreeList.size() >= 10000) {
+        WITH_LOCK(gMutex) {
+            gFreeList.push(m);
+        }
+        return;
+    }
+    tFreeList.push(m);
+}
+
+Message *create(process_t source, session_t session, wild::Any content) {
+    auto m = allocMessage();
+    return new (m) Message{source, session, content};
+}
+
+void destroy(Message *msg) {
+    msg->~Message();
+    deallocMessage(msg);
+}
+
+}
+
 struct KillProcess {};
 struct AbortedRequest {};
 struct ProcessNotExist {};
@@ -53,7 +147,7 @@ session_t sessionForResponse(session_t session) {
     return session_t(-session.Value());
 }
 
-MessageType typeOfMessage(message::Message *msg) {
+MessageType typeOfMessage(Message *msg) {
     int32 session = static_cast<int32>(msg->session.Value());
     if (session > 0) {
         return MessageType::kRequest;
@@ -90,7 +184,7 @@ set_running(Coroutine *co) {
     tCoroutine = co;
 }
 
-message::Content suspend();
+wild::Any suspend();
 
 struct ExitException : public std::exception {
     virtual const char *what() const noexcept final override {
@@ -103,7 +197,7 @@ struct ExitException : public std::exception {
 class Result {
 public:
 
-    void set_value(message::Content value) {
+    void set_value(wild::Any value) {
         _value = std::move(value);
     }
 
@@ -111,7 +205,7 @@ public:
         _exception = e;
     }
 
-    message::Content get_value() {
+    wild::Any get_value() {
         if (_exception) {
             std::rethrow_exception(_exception);
         }
@@ -119,7 +213,7 @@ public:
     }
 
 private:
-    message::Content _value;
+    wild::Any _value;
     std::exception_ptr _exception;
 };
 
@@ -130,11 +224,11 @@ public:
         return _context;
     }
 
-    message::Content get_result() {
+    wild::Any get_result() {
         return _result.get_value();
     }
 
-    void set_result(message::Content value) {
+    void set_result(wild::Any value) {
         _result.set_value(std::move(value));
     }
 
@@ -561,14 +655,14 @@ static ProcessUniquePtr find(process_t pid) {
 class Process {
 public:
 
-    void push_message(message::Message *msg) {
+    void push_message(Message *msg) {
         bool wait = _mailbox.push(msg);
         if (wait) {
             sched::resume(this);
         }
     }
 
-    message::Content suspend(session_t session) {
+    wild::Any suspend(session_t session) {
         Coroutine *running = coroutine::current();
         _block_sessions[session] = running;
         return coroutine::suspend();
@@ -737,11 +831,11 @@ public:
 
     void yield() {
         Session session = new_session();
-        push_message(message::create(process_t(0), sessionForResponse(session.Value()), message::Content{}));
+        push_message(message::create(process_t(0), sessionForResponse(session.Value()), wild::Any{}));
         suspend(session.Value());
     }
 
-    void response(process_t source, session_t session, message::Content content) {
+    void response(process_t source, session_t session, wild::Any content) {
         if (auto p = find(source)) {
             p->push_message(message::create(pid(), sessionForResponse(session), std::move(content)));
         }
@@ -812,7 +906,7 @@ public:
         handler.addstack = addstack;
     }
 
-    message::Message *nextMessage() {
+    Message *nextMessage() {
         Coroutine *co = coroutine::current();
         assert(co != nullptr);
         while (_inbox.empty()) {
@@ -887,8 +981,8 @@ private:
 
     std::atomic<intptr> _refcnt;
 
-    message::Mailbox _mailbox;
-    std::deque<message::Message*> _inbox;
+    Mailbox _mailbox;
+    std::deque<Message*> _inbox;
 
     wild::IdAllocator<uint32> _sessions;
 
@@ -1012,7 +1106,7 @@ void kill(process_t pid) {
     }
 }
 
-message::Content suspend(session_t session) {
+wild::Any suspend(session_t session) {
     return current()->suspend(session);
 }
 
@@ -1025,7 +1119,7 @@ void release_session(session_t session) {
     current()->release_session(session);
 }
 
-message::Content request(process_t pid, message::Content content) {
+wild::Any request(process_t pid, wild::Any content) {
     Process *running = current();
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
@@ -1039,7 +1133,7 @@ message::Content request(process_t pid, message::Content content) {
     return running->suspend(session.Value());
 }
 
-void response(process_t source, session_t session, message::Content content) {
+void response(process_t source, session_t session, wild::Any content) {
     if (Process *running = process::current()) {
         running->response(source, session, std::move(content));
     } else if (auto p = find(source)) {
@@ -1047,15 +1141,15 @@ void response(process_t source, session_t session, message::Content content) {
     }
 }
 
-void response(message::Content content) {
+void response(wild::Any content) {
     response(sender(), session(), std::move(content));
 }
 
-void send(process_t pid, message::Content content) {
+void send(process_t pid, wild::Any content) {
     send(pid, session_t(), std::move(content));
 }
 
-void send(process_t pid, session_t session, message::Content content) {
+void send(process_t pid, session_t session, wild::Any content) {
     if (auto p = find(pid)) {
         p->push_message(message::create(self(), session, std::move(content)));
     }
@@ -1124,7 +1218,7 @@ void exit() {
     throw coroutine::ExitException();
 }
 
-message::Content suspend() {
+wild::Any suspend() {
     Coroutine *running = current();
     assert(running != nullptr);
     context::transfer(running->context(), coroutine::thread_context());

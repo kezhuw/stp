@@ -1,6 +1,5 @@
 #include "time.hpp"
 #include "types.hpp"
-#include "message.hpp"
 #include "process.hpp"
 #include "module.hpp"
 
@@ -95,7 +94,7 @@ _free_node(struct Timer *t, struct timer_node *node) {
 
 inline void
 _send(pid_t pid, sid_t session) {
-    process::response(process_t(pid), session_t(session), message::Content{});
+    process::response(process_t(pid), session_t(session));
 }
 
 void

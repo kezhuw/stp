@@ -1,9 +1,9 @@
 #pragma once
 
 #include "types.hpp"
-#include "message.hpp"
 
 #include <wild/types.hpp>
+#include <wild/Any.hpp>
 #include <wild/SpinLock.hpp>
 
 #include <memory>
@@ -70,7 +70,7 @@ process_t spawn(Closure&& closure, size_t addstack = 0) {
     return spawn(func, addstack);
 }
 
-message::Content suspend(session_t);
+wild::Any suspend(session_t);
 
 process_t self();
 
@@ -132,11 +132,11 @@ private:
 
 Session new_session();
 
-void send(process_t pid, message::Content content);
-void send(process_t pid, session_t session, message::Content content);
-message::Content request(process_t pid, message::Content content);
-void response(message::Content content = {});
-void response(process_t pid, session_t session, message::Content content = {});
+void send(process_t pid, wild::Any content);
+void send(process_t pid, session_t session, wild::Any content);
+wild::Any request(process_t pid, wild::Any content);
+void response(wild::Any content = {});
+void response(process_t pid, session_t session, wild::Any content = {});
 
 process_t sender();
 session_t session();

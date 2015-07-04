@@ -58,12 +58,8 @@ inline bool operator!=(session_t const& a, session_t const& b) {
 
 }
 
-namespace message { struct Message; }
-
 using process_t = process::process_t;
 using session_t = process::session_t;
-
-using Message = message::Message;
 
 }
 

@@ -4,7 +4,6 @@ project(stp)
 set(stp_SRCS
 process.cpp
 context.cpp
-message.cpp
 io.cpp
 time.cpp
 fd.cpp
