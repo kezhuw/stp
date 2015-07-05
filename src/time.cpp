@@ -187,14 +187,14 @@ struct UpdateMessage {
     uint64 timestamp;
 };
 
-struct TimeoutMessage {
+struct TimeoutRequest {
     uint64 timeout;
 };
 
 void
 _main() {
     struct Timer t;
-    process::request_callback<TimeoutMessage>([&t](TimeoutMessage *request) {
+    process::request_callback<TimeoutRequest>([&t](TimeoutRequest *request) {
         _timeout(&t, process::sender(), process::session(), request->timeout);
     });
     process::notification_callback<UpdateMessage>([&](UpdateMessage *update) {
@@ -255,7 +255,7 @@ namespace time {
 
 void
 sleep(uint64 msecs) {
-    process::request(TIMER_SERVICE, TimeoutMessage{msecs});
+    process::request(TIMER_SERVICE, TimeoutRequest{msecs});
 }
 
 uint64
