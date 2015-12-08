@@ -1,9 +1,7 @@
 #include "stp.hpp"
-#include "net.hpp"
-#include "io.hpp"
 
-#include <wild/module.hpp>
-#include <wild/string.hpp>
+#include "wild/module.hpp"
+#include "wild/string.hpp"
 
 #include <algorithm>
 #include <atomic>

@@ -4,9 +4,9 @@
 #include "module.hpp"
 #include "process.hpp"
 
-#include <wild/module.hpp>
-#include <wild/string.hpp>
-#include <wild/ScopeGuard.hpp>
+#include "wild/module.hpp"
+#include "wild/string.hpp"
+#include "wild/ScopeGuard.hpp"
 
 #include <signal.h>
 #include <unistd.h>
