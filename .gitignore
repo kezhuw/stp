@@ -1,2 +1,5 @@
 /build
 /bazel-*
+.vagrant/
+cscope.*
+*.sw[op]
