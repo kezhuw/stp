@@ -7,6 +7,8 @@
 #include "wild/FreeList.hpp"
 #include "wild/module.hpp"
 
+#include <pthread.h>
+
 #include <assert.h>
 #include <limits.h>
 
@@ -224,6 +226,8 @@ std::atomic<uint64> STARTTIME;
 std::atomic<uint64> STARTTIME_REALTIME;
 process_t TIMER_SERVICE;
 
+std::thread time_thread;
+
 void
 tick(process_t timer) {
     for (;;) {
@@ -243,7 +247,7 @@ init() {
     STARTTIME.store(_gettime(), std::memory_order_relaxed);
     STARTTIME_REALTIME.store(_realtime(), std::memory_order_relaxed);
     TIMER_SERVICE = process::spawn(_main, sizeof(struct Timer));
-    std::thread(tick, TIMER_SERVICE).detach();
+    time_thread = std::thread(tick, TIMER_SERVICE);
 }
 
 wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Timer);
@@ -252,6 +256,12 @@ wild::module::Definition Timer(module::STP, "stp:Timer", init, module::Order::Ti
 
 namespace stp {
 namespace time {
+
+void
+stop() {
+    pthread_cancel(time_thread.native_handle());
+    time_thread.join();
+}
 
 void
 sleep(uint64 msecs) {

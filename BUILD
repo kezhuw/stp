@@ -3,9 +3,14 @@ cc_library(
     srcs = [
         "src/context.cpp",
         "src/context.hpp",
+        "src/main.cpp",
+        "src/main.hpp",
+        "src/sched.hpp",
         "src/fd.hpp",
         "src/io.cpp",
         "src/io.hpp",
+        "src/os.cpp",
+        "src/os.hpp",
         "src/tcp.cpp",
         "src/tcp.hpp",
         "src/types.hpp",
@@ -27,6 +32,7 @@ cc_library(
         "-std=c++1y",
     ],
     linkopts = [
+        "-ldl",
         "-pthread",
     ],
     deps = [

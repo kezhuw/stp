@@ -11,6 +11,7 @@
 #include <sys/event.h>
 #include <sys/time.h>
 
+#include <assert.h>
 #include <signal.h>
 #include <pthread.h>
 
@@ -56,12 +57,14 @@ void kqueue_poll(int kq) {
 
 static int kqfd = -1;
 
+std::thread _kqueue_thread;
+
 void init() {
     kqfd = kqueue();
     if (kqfd == -1) {
         throw std::system_error(errno, std::system_category(), "kqueue()");
     }
-    std::thread(kqueue_poll, kqfd).detach();
+    _kqueue_thread = std::thread(kqueue_poll, kqfd);
 }
 
 wild::module::Definition fd_polll(module::STP, "stp:fd_kqueue", init, module::Order::Fdpoll);
@@ -73,6 +76,11 @@ namespace fd {
 
 static_assert(std::is_same<decltype(std::declval<process_t>().Value()), uint32>::value, "");
 static_assert(std::is_same<decltype(std::declval<session_t>().Value()), uint32>::value, "");
+
+void stop() {
+    pthread_cancel(_kqueue_thread.native_handle());
+    _kqueue_thread.join();
+}
 
 void wait(int fd, Event event) {
     assert(event == Event::kRead || event == Event::kWrite);

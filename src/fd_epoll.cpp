@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/epoll.h>
+#include <pthread.h>
 
 #include <cassert>
 
@@ -97,6 +98,8 @@ struct event_poll {
     uint32 events[2];
 } EPOLL;
 
+std::thread _epoll_thread;
+
 void _epoll_sigmask() {
     sigset_t sigset;
     sigfillset(&sigset);
@@ -147,7 +150,7 @@ void init() {
     EPOLL.events[0] = ReadEvents;
     EPOLL.events[1] = WriteEvents;
 
-    std::thread(_epoll_poll, epfd).detach();
+    _epoll_thread = std::thread(_epoll_poll, epfd);
 }
 
 wild::module::Definition fd_poll(module::STP, "stp:fd_epoll", init, module::Order::Fdpoll);
@@ -156,6 +159,11 @@ wild::module::Definition fd_poll(module::STP, "stp:fd_epoll", init, module::Orde
 
 namespace stp {
 namespace fd {
+
+void stop() {
+    pthread_cancel(_epoll_thread.native_handle());
+    _epoll_thread.join();
+}
 
 void wait(int fd, Event event) {
     process::Session session = process::new_session();

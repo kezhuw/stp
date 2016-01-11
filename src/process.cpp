@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <vector>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -36,6 +37,26 @@
 #include <unordered_set>
 
 #include <unistd.h>
+
+namespace stp {
+
+namespace fd {
+void stop();
+}
+
+namespace time {
+void stop();
+}
+
+namespace process {
+class Process;
+}
+
+namespace sched {
+void resume(process::Process *p);
+}
+
+}
 
 namespace stp {
 namespace process {
@@ -157,8 +178,6 @@ MessageType typeOfMessage(Message *msg) {
 
 class Process;
 class Coroutine;
-
-namespace sched { static void resume(Process *); }
 
 void wakeup(Coroutine *co);
 
@@ -1226,29 +1245,40 @@ wild::Any suspend() {
 
 }
 
+}
+}
+
+namespace stp {
 namespace sched {
 
 static class Scheduler {
 public:
 
-    void start(size_t n) {
-        n = std::max(size_t(2), n);
-        for (size_t i=0; i<n; ++i) {
-            _threads.emplace_back(&Scheduler::run, this);
+    void stop(int code) {
+        if (_stopFired.test_and_set(std::memory_order_relaxed)) {
+            return;
+        }
+        fd::stop();
+        time::stop();
+        _exitcode = code;
+        _stop.store(true, std::memory_order_seq_cst);
+        for (size_t i=0, n=_threads.size(); i<n; ++i) {
+            _signaler.send();
         }
     }
 
-    void stop() {
-        _stop.store(std::memory_order_seq_cst);
-        for (size_t i=0, n=_threads.size(); i<n; ++i) {
-            _signaler.send();
+    int serve() {
+        auto n = std::max(std::thread::hardware_concurrency(), 2u);
+        for (unsigned i=0; i<n; ++i) {
+            _threads.emplace_back(&Scheduler::run, this);
         }
         for (auto& td : _threads) {
             td.join();
         }
+        return _exitcode;
     }
 
-    void resume(Process *p) {
+    void resume(process::Process *p) {
         process::ref(p);
         bool waiting = false;
         WITH_LOCK(_resumeq_lock) {
@@ -1267,7 +1297,7 @@ private:
 
     void run() {
         while (!_stop.load(std::memory_order_relaxed)) {
-            Process *p;
+            process::Process *p;
             WITH_LOCK(_runq_lock) {
                 if (_runq == nullptr) {
                     WITH_LOCK(_resumeq_lock) {
@@ -1288,27 +1318,28 @@ private:
         }
     }
 
+    int _exitcode;
+    std::atomic_flag _stopFired = ATOMIC_FLAG_INIT;
     std::atomic<bool> _stop;
     std::vector<std::thread> _threads;
     wild::SpinLock _runq_lock;
-    Process *_runq;
+    process::Process *_runq;
     wild::SpinLock _resumeq_lock;
-    wild::AppendList<Process, &Process::next> _resumeq;
+    wild::AppendList<process::Process, &process::Process::next> _resumeq;
     int _idle_workers;
     wild::Signaler _signaler;
 } scheduler;
 
-static void resume(Process *p) {
+int serve() {
+    return scheduler.serve();
+}
+
+void stop(int code) {
+    scheduler.stop(code);
+}
+
+void resume(process::Process *p) {
     scheduler.resume(p);
-}
-
-static void init() {
-    unsigned n = std::thread::hardware_concurrency();
-    scheduler.start(static_cast<size_t>(n));
-}
-
-static wild::module::Definition sched(module::STP, "stp::sched", init, module::Order::Sched);
-
 }
 
 }

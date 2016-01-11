@@ -6,6 +6,9 @@ cc_binary(
         "-Ideps",
         "-std=c++1y",
     ],
+    linkopts = [
+        "-export-dynamic",
+    ],
 )
 
 cc_binary(
@@ -15,5 +18,8 @@ cc_binary(
     copts = [
         "-Ideps",
         "-std=c++1y",
+    ],
+    linkopts = [
+        "-export-dynamic",
     ],
 )
