@@ -23,14 +23,14 @@ cc_library(
         "stp.hpp",
     ],
     copts = [
-        "-Iexternal",
+        "-Ideps",
         "-std=c++1y",
     ],
     linkopts = [
         "-pthread",
     ],
     deps = [
-        "@wild//:wild",
+        "//external:wild",
     ],
     visibility = ["//visibility:public"],
 )

@@ -1,5 +1,4 @@
-git_repository(
+bind(
     name = "wild",
-    remote = "https://github.com/kezhuw/wild.git",
-    commit = "ef03d505ac58155c81e814a82263a54956299a86",
+    actual = "//deps/wild",
 )

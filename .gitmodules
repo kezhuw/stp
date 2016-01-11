@@ -1,0 +1,3 @@
+[submodule "wild"]
+	path = deps/wild
+	url = https://github.com/kezhuw/wild.git
