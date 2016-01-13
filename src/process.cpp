@@ -179,8 +179,6 @@ MessageType typeOfMessage(Message *msg) {
 class Process;
 class Coroutine;
 
-void wakeup(Coroutine *co);
-
 namespace coroutine {
 
 static thread_local Coroutine *tCoroutine;
@@ -202,6 +200,7 @@ set_running(Coroutine *co) {
 }
 
 wild::Any suspend();
+void wakeup(Coroutine *co);
 
 struct ExitException : public std::exception {
     virtual const char *what() const noexcept final override {
@@ -287,6 +286,12 @@ public:
             }
         } enter(this);
         context::transfer(coroutine::thread_context(), _context);
+    }
+
+    wild::Any yield() {
+        context::transfer(_context, coroutine::thread_context());
+        assert(this == coroutine::current());
+        return get_result();
     }
 
 private:
@@ -429,8 +434,8 @@ void Mutex::lock() {
             assert(!_coroutines.empty());
             assert(_coroutines.front() == running);
         } catch (...) {
-            wild::print_exception(std::current_exception());
-            std::terminate();
+            _coroutines.erase(std::remove(_coroutines.begin(), _coroutines.end(), running));
+            throw;
         }
     }
 }
@@ -453,7 +458,7 @@ void Mutex::unlock() {
     _coroutines.pop_front();
     if (!_coroutines.empty()) {
         auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
-        process::wakeup(pending);
+        coroutine::wakeup(pending);
     }
 }
 
@@ -545,10 +550,16 @@ public:
         }
     }
 
+    wild::Any suspend() {
+        auto running = coroutine::current();
+        _suspend_coroutines.insert(running);
+        return running->yield();
+    }
+
     wild::Any block(session_t session) {
         Coroutine *running = coroutine::current();
         _block_sessions[session] = running;
-        return coroutine::suspend();
+        return running->yield();
     }
 
     Coroutine *unblock(session_t session) {
@@ -573,21 +584,21 @@ public:
         coroutines.clear();
     }
 
-    void interrupt_inbox_coroutines(std::exception_ptr e) {
-        for (auto co : _inbox_coroutines) {
-            co->set_exception(e);
-            wakeup(co);
-        }
-        _inbox_coroutines.clear();
-    }
-
     void interrupt_block_coroutines(std::exception_ptr e) {
         for (auto value : _block_sessions) {
             auto co = value.second;
             co->set_exception(e);
-            wakeup(co);
+            _wakeup_coroutines.push_back(co);
         }
         _block_sessions.clear();
+    }
+
+    void interrupt_suspend_coroutines(std::exception_ptr e) {
+        for (auto co : _suspend_coroutines) {
+            co->set_exception(e);
+            _wakeup_coroutines.push_back(co);
+        }
+        _suspend_coroutines.clear();
     }
 
     void resume(Coroutine *co, bool exiting = false) {
@@ -610,8 +621,8 @@ public:
     void exit() {
         auto exitException = std::make_exception_ptr(coroutine::ExitException{});
         for (;;) {
-            interrupt_inbox_coroutines(exitException);
             interrupt_block_coroutines(exitException);
+            interrupt_suspend_coroutines(exitException);
             if (_wakeup_coroutines.empty()) {
                 break;
             }
@@ -630,7 +641,7 @@ public:
             exit();
             return false;
         }
-        return !(_inbox_coroutines.empty() && _block_sessions.empty());
+        return !(_block_sessions.empty() && _suspend_coroutines.empty());
     }
 
     void run() {
@@ -640,22 +651,25 @@ public:
         //   block to read maibox.
         while (!_spawn_coroutines.empty()
             || !_wakeup_coroutines.empty()
-            || (!_inbox.empty() && !_inbox_coroutines.empty())) {
+            || (!_inbox.empty() && _inbox_coroutine != nullptr)) {
             while (!_spawn_coroutines.empty()) {
                 resume(wild::take_front(_spawn_coroutines));
             }
             while (!_wakeup_coroutines.empty()) {
                 resume(wild::take_front(_wakeup_coroutines));
             }
-            while (!_inbox.empty() && !_inbox_coroutines.empty()) {
-                resume(wild::take_front(_inbox_coroutines));
+            if (!_inbox.empty() && _inbox_coroutine != nullptr) {
+                wakeup(_inbox_coroutine);
+                _inbox_coroutine = nullptr;
             }
         }
         sweep_zombies();
     }
 
     void wakeup(Coroutine *co) {
-        _wakeup_coroutines.push_back(co);
+        if (_suspend_coroutines.erase(co) != 0) {
+            _wakeup_coroutines.push_back(co);
+        }
     }
 
     enum class ResumeResult : uintptr {
@@ -685,7 +699,7 @@ public:
                     } else {
                         co->set_result(std::move(msg->content));
                     }
-                    wakeup(co);
+                    _wakeup_coroutines.push_back(co);
                 } else {
                     printf("unknown response session[%u]\n", session);
                 }
@@ -782,20 +796,14 @@ public:
         handler.addstack = addstack;
     }
 
-    Message *nextMessage() {
-        Coroutine *co = coroutine::current();
-        assert(co != nullptr);
-        while (_inbox.empty()) {
-            _inbox_coroutines.push_back(co);
-            coroutine::suspend();
-        }
-        return wild::take_front(_inbox);
-    }
-
     void serve() {
         auto running = coroutine::current();
         for (;;) {
-            MessageUniquePtr msg(nextMessage());
+            if (_inbox.empty()) {
+                _inbox_coroutine = running;
+                coroutine::suspend();
+            }
+            MessageUniquePtr msg(wild::take_front(_inbox));
             auto it = _message_handlers.find(std::type_index(msg->content.type()));
             if (it == _message_handlers.end()) {
                 continue;
@@ -854,10 +862,11 @@ private:
 
     wild::IdAllocator<uint32> _sessions;
 
-    std::deque<Coroutine*> _inbox_coroutines;
+    Coroutine *_inbox_coroutine = nullptr;
     std::deque<Coroutine*> _spawn_coroutines;
     std::deque<Coroutine*> _wakeup_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
+    std::unordered_set<Coroutine*> _suspend_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
     std::unordered_map<std::type_index, HandlerInfo> _message_handlers;
@@ -868,12 +877,6 @@ private:
 public:
     Process *next;
 };
-
-void wakeup(Coroutine *co) {
-    auto p = process::current();
-    assert(p != nullptr);
-    p->wakeup(co);
-}
 
 process_t sender() {
     return coroutine::current()->message_sender();
@@ -1068,11 +1071,11 @@ void exit() {
 }
 
 wild::Any suspend() {
-    Coroutine *running = current();
-    assert(running != nullptr);
-    context::transfer(running->context(), coroutine::thread_context());
-    assert(running == current());
-    return running->get_result();
+    return process::current()->suspend();
+}
+
+void wakeup(Coroutine *co) {
+    return process::current()->wakeup(co);
 }
 
 wild::Any block(session_t session) {
