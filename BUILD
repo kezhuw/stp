@@ -11,6 +11,7 @@ cc_library(
         "src/io.hpp",
         "src/os.cpp",
         "src/os.hpp",
+        "src/SharedCallable.hpp",
         "src/tcp.cpp",
         "src/tcp.hpp",
         "src/types.hpp",
