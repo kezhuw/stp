@@ -70,8 +70,6 @@ process_t spawn(Closure&& closure, size_t addstack = 0) {
     return spawn(func, addstack);
 }
 
-wild::Any suspend(session_t);
-
 process_t self();
 
 void exit();
@@ -303,6 +301,8 @@ void sleep(uint64 msecs);
 
 // relinquish CPU
 void yield();
+
+wild::Any block(session_t);
 
 void exit();
 

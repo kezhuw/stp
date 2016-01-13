@@ -679,7 +679,7 @@ public:
         }
     }
 
-    wild::Any suspend(session_t session) {
+    wild::Any block(session_t session) {
         Coroutine *running = coroutine::current();
         _block_sessions[session] = running;
         return coroutine::suspend();
@@ -849,7 +849,7 @@ public:
     void yield() {
         Session session = new_session();
         push_message(message::create(process_t(0), sessionForResponse(session.Value()), wild::Any{}));
-        suspend(session.Value());
+        block(session.Value());
     }
 
     void response(process_t source, session_t session, wild::Any content) {
@@ -1123,10 +1123,6 @@ void kill(process_t pid) {
     }
 }
 
-wild::Any suspend(session_t session) {
-    return current()->suspend(session);
-}
-
 Session new_session() {
     Process *running = process::current();
     return running->new_session();
@@ -1147,7 +1143,7 @@ wild::Any request(process_t pid, wild::Any content) {
     } else {
         running->push_message(message::create(pid, sessionForResponse(session.Value()), std::make_exception_ptr(ProcessNotExist{})));
     }
-    return running->suspend(session.Value());
+    return running->block(session.Value());
 }
 
 void response(process_t source, session_t session, wild::Any content) {
@@ -1241,6 +1237,10 @@ wild::Any suspend() {
     context::transfer(running->context(), coroutine::thread_context());
     assert(running == current());
     return running->get_result();
+}
+
+wild::Any block(session_t session) {
+    return process::current()->block(session);
 }
 
 }
