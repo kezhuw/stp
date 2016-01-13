@@ -63,7 +63,7 @@ read(int fd, byte_t *buf, size_t len) {
 }
 
 std::tuple<size_t, int>
-write(int fd, byte_t *data, size_t size) {
+write(int fd, const byte_t *data, size_t size) {
     size_t wr = 0;
     for (;;) {
         size_t n;
