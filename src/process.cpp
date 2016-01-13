@@ -177,9 +177,14 @@ MessageType typeOfMessage(Message *msg) {
 }
 
 class Process;
-class Coroutine;
 
+}
+}
+
+namespace stp {
 namespace coroutine {
+
+class Coroutine;
 
 static thread_local Coroutine *tCoroutine;
 
@@ -207,8 +212,6 @@ struct ExitException : public std::exception {
         return "coroutine::ExitException";
     }
 };
-
-}
 
 class Result {
 public:
@@ -329,6 +332,14 @@ private:
     context::Context *_context;
     std::function<void()> _function;
 };
+
+}
+}
+
+namespace stp {
+namespace process {
+
+using Coroutine = coroutine::Coroutine;
 
 static thread_local Process *tProcess;
 
@@ -1039,6 +1050,10 @@ void Session::close() {
     p->release_session(_session);
 }
 
+}
+}
+
+namespace stp {
 namespace coroutine {
 
 void spawn(std::function<void()> func, size_t addstack) {
@@ -1075,13 +1090,11 @@ wild::Any suspend() {
 }
 
 void wakeup(Coroutine *co) {
-    return process::current()->wakeup(co);
+    process::current()->wakeup(co);
 }
 
 wild::Any block(session_t session) {
     return process::current()->block(session);
-}
-
 }
 
 }

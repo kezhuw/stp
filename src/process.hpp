@@ -215,6 +215,10 @@ private:
     uintptr _opaque;
 };
 
+}
+}
+
+namespace stp {
 namespace coroutine {
 
 void spawn(std::function<void()> func, size_t addstack = 0);
@@ -242,8 +246,6 @@ void yield();
 wild::Any block(session_t);
 
 void exit();
-
-}
 
 }
 }
