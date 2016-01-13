@@ -221,7 +221,9 @@ private:
 namespace stp {
 namespace coroutine {
 
-void spawn(std::function<void()> func, size_t addstack = 0);
+class Coroutine;
+
+Coroutine* spawn(std::function<void()> func, size_t addstack = 0);
 
 // std::function need copyable function object.
 // Lambda with move-only object captured is not copyable.
@@ -231,10 +233,12 @@ template<typename Callable
        , std::enable_if_t<!std::is_same<Callable, std::function<void()>>::value>* = nullptr
        , std::enable_if_t<!std::is_copy_constructible<Callable>::value>* = nullptr
         >
-void spawn(Callable&& callable, size_t addstack = 0) {
+Coroutine* spawn(Callable&& callable, size_t addstack = 0) {
     std::function<void()> func = SharedCallable(new MoveonlyCallable<std::remove_cv_t<Callable>>(std::forward<Callable>(callable)));
     return spawn(func, addstack);
 }
+
+Coroutine* self();
 
 void timeout(uint64 msecs, std::function<void()> func, size_t addstack = 0);
 
@@ -244,6 +248,9 @@ void sleep(uint64 msecs);
 void yield();
 
 wild::Any block(session_t);
+
+wild::Any suspend();
+void wakeup(Coroutine *co);
 
 void exit();
 

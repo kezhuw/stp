@@ -184,8 +184,6 @@ class Process;
 namespace stp {
 namespace coroutine {
 
-class Coroutine;
-
 static thread_local Coroutine *tCoroutine;
 
 context::Context *
@@ -758,9 +756,10 @@ public:
         return _pid;
     }
 
-    void spawn(std::function<void()> func, size_t addstack) {
+    Coroutine* spawn(std::function<void()> func, size_t addstack) {
         auto co = Coroutine::create(std::move(func), addstack);
         _spawn_coroutines.push_back(co);
+        return co;
     }
 
     static Process *create(std::function<void()> func, size_t addstack) {
@@ -1056,10 +1055,14 @@ void Session::close() {
 namespace stp {
 namespace coroutine {
 
-void spawn(std::function<void()> func, size_t addstack) {
+Coroutine* spawn(std::function<void()> func, size_t addstack) {
     auto p = process::current();
     assert(p != nullptr);
-    p->spawn(std::move(func), addstack);
+    return p->spawn(std::move(func), addstack);
+}
+
+Coroutine* self() {
+    return current();
 }
 
 void sleep(uint64 msecs) {
