@@ -457,102 +457,6 @@ void Mutex::unlock() {
     }
 }
 
-class Condition {
-public:
-    Condition() = default;
-    ~Condition() = default;
-
-    void wait(Mutex& locker);
-    void wait(Mutex& locker, std::function<bool()> pred);
-
-    void notify_one();
-    void notify_all();
-    void interrupt_all(std::exception_ptr e);
-
-    static Condition *create();
-    static Condition *ref(Condition *m);
-    static void unref(Condition *m);
-
-private:
-    Condition(const Condition&) = delete;
-    Condition& operator=(const Condition&) = delete;
-
-    Condition(Condition&&) = delete;
-    Condition& operator=(Condition&&) = delete;
-
-    int64_t _refcnt;
-    std::deque<Coroutine*> _coroutines;
-};
-
-void enroll(Condition *c);
-void delist(Condition *c);
-
-Condition* Condition::create() {
-    auto c = new Condition;
-    c->_refcnt = 1;
-    enroll(c);
-    return c;
-}
-
-Condition* Condition::ref(Condition *c) {
-    c->_refcnt += 1;
-    return c;
-}
-
-void Condition::unref(Condition *c) {
-    assert(c->_refcnt > 0);
-    c->_refcnt -= 1;
-    if (c->_refcnt == 0) {
-        assert(c->_coroutines.empty());
-        delist(c);
-        delete c;
-    }
-}
-
-void Condition::wait(Mutex& locker) {
-    auto running = coroutine::current();
-    assert(running != nullptr);
-    locker.unlock();
-    _coroutines.push_back(running);
-    try {
-        coroutine::suspend();
-        locker.lock();
-    } catch (const coroutine::ExitException&) {
-        locker.lock();
-    } catch (...) {
-        wild::print_exception(std::current_exception());
-        std::terminate();
-    }
-}
-
-void Condition::wait(Mutex& locker, std::function<bool()> pred) {
-    while (!pred()) {
-        wait(locker);
-    }
-}
-
-void Condition::notify_one() {
-    if (!_coroutines.empty()) {
-        auto pending = wild::take_front(_coroutines);
-        process::wakeup(pending);
-    }
-}
-
-void Condition::notify_all() {
-    for (auto pending : _coroutines) {
-        process::wakeup(pending);
-    }
-    _coroutines.clear();
-}
-
-void Condition::interrupt_all(std::exception_ptr e) {
-    for (auto pending : _coroutines) {
-        pending->set_exception(e);
-        process::wakeup(pending);
-    }
-    _coroutines.clear();
-}
-
 }
 
 Mutex::Mutex() {
@@ -582,44 +486,6 @@ void Mutex::unlock() {
 bool Mutex::try_lock() {
     auto m = reinterpret_cast<detail::Mutex*>(_opaque);
     return m->try_lock();
-}
-
-Condition::Condition() {
-    _opaque = reinterpret_cast<uintptr>(detail::Condition::create());
-}
-
-Condition::Condition(const Condition& other) {
-    auto c = reinterpret_cast<detail::Condition*>(other._opaque);
-    _opaque = reinterpret_cast<uintptr>(detail::Condition::ref(c));
-}
-
-Condition::~Condition() {
-    auto c = reinterpret_cast<detail::Condition*>(_opaque);
-    detail::Condition::unref(c);
-}
-
-void Condition::wait(Mutex& locker) {
-    static_assert(sizeof(Mutex) == sizeof(uintptr), "");
-    auto p = reinterpret_cast<uintptr*>(std::addressof(locker));
-    auto m = reinterpret_cast<detail::Mutex*>(*p);
-    auto c = reinterpret_cast<detail::Condition*>(_opaque);
-    c->wait(*m);
-}
-
-void Condition::wait(Mutex& locker, std::function<bool()> pred) {
-    while (!pred()) {
-        wait(locker);
-    }
-}
-
-void Condition::notify_one() {
-    auto c = reinterpret_cast<detail::Condition*>(_opaque);
-    c->notify_one();
-}
-
-void Condition::notify_all() {
-    auto c = reinterpret_cast<detail::Condition*>(_opaque);
-    c->notify_all();
 }
 
 static wild::SpinLock gProcsLocker;
@@ -724,12 +590,6 @@ public:
         _block_sessions.clear();
     }
 
-    void interrupt_condvar_coroutines(std::exception_ptr e) {
-        for (auto c : _condvars) {
-            c->interrupt_all(std::make_exception_ptr(e));
-        }
-    }
-
     void resume(Coroutine *co, bool exiting = false) {
         co->resume();
         try {
@@ -752,7 +612,6 @@ public:
         for (;;) {
             interrupt_inbox_coroutines(exitException);
             interrupt_block_coroutines(exitException);
-            interrupt_condvar_coroutines(exitException);
             if (_wakeup_coroutines.empty()) {
                 break;
             }
@@ -961,14 +820,6 @@ public:
         delete p;
     }
 
-    void enroll(detail::Condition *c) {
-        _condvars.insert(c);
-    }
-
-    void delist(detail::Condition *c) {
-        _condvars.erase(c);
-    }
-
 private:
 
     Process()
@@ -1008,7 +859,6 @@ private:
     std::deque<Coroutine*> _wakeup_coroutines;
     std::vector<Coroutine*> _zombie_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
-    std::unordered_set<detail::Condition*> _condvars;
 
     std::unordered_map<std::type_index, HandlerInfo> _message_handlers;
 
@@ -1184,20 +1034,6 @@ process_t Session::Pid() const {
 void Session::close() {
     auto p = reinterpret_cast<Process*>(_process);
     p->release_session(_session);
-}
-
-namespace detail {
-
-void enroll(Condition *c) {
-    auto p = process::current();
-    p->enroll(c);
-}
-
-void delist(Condition *c) {
-    auto p = process::current();
-    p->delist(c);
-}
-
 }
 
 namespace coroutine {

@@ -253,31 +253,6 @@ private:
     uintptr _opaque;
 };
 
-class Condition {
-public:
-
-    Condition();
-    ~Condition();
-
-    void wait(Mutex& locker);
-    void wait(Mutex& locker, std::function<bool()> pred);
-
-    void notify_one();
-    void notify_all();
-
-    // allow capturing by copying
-    Condition(const Condition&);
-
-private:
-
-    Condition& operator=(const Condition&) = delete;
-
-    Condition(Condition&&) = delete;
-    Condition& operator=(Condition&&) = delete;
-
-    uintptr _opaque;
-};
-
 namespace coroutine {
 
 void spawn(std::function<void()> func, size_t addstack = 0);
