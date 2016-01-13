@@ -94,7 +94,7 @@ void wait(int fd, Event event) {
     if (kevent(kqfd, &ev, 1, NULL, 0, NULL) == -1) {
         throw std::system_error(errno, std::system_category(), "kevent(EV_ADD)");
     }
-    process::suspend(session.Value());
+    coroutine::block(session.Value());
 }
 
 }

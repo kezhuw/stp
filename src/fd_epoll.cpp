@@ -183,7 +183,7 @@ void wait(int fd, Event event) {
         // reporting of fd, but no deletion is performed.
         _epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ev);
     };
-    process::suspend(session.Value());
+    coroutine::block(session.Value());
 }
 
 }
