@@ -187,29 +187,6 @@ void notification_coroutine(std::function<void(MessageT *message)> handler, size
 
 void serve();
 
-class Mutex {
-public:
-    Mutex();
-    ~Mutex();
-
-    void lock();
-    void unlock();
-    bool try_lock();
-
-    // capture by copying
-    Mutex(const Mutex&);
-
-private:
-
-    Mutex& operator=(const Mutex&) = delete;
-
-    // there is no empty mutex.
-    Mutex(Mutex&&) = delete;
-    Mutex& operator=(Mutex&&) = delete;
-
-    uintptr _opaque;
-};
-
 }
 }
 
@@ -243,6 +220,29 @@ wild::Any suspend();
 void wakeup(Coroutine *co);
 
 void exit();
+
+class Mutex {
+public:
+    Mutex();
+    ~Mutex();
+
+    void lock();
+    void unlock();
+    bool try_lock();
+
+    // capture by copying
+    Mutex(const Mutex&);
+
+private:
+
+    Mutex& operator=(const Mutex&) = delete;
+
+    // there is no empty mutex.
+    Mutex(Mutex&&) = delete;
+    Mutex& operator=(Mutex&&) = delete;
+
+    uintptr _opaque;
+};
 
 }
 }

@@ -385,123 +385,6 @@ struct KillException : public std::exception {
 void ref(Process *);
 void unref(Process *);
 
-namespace detail {
-
-class Mutex {
-public:
-    Mutex() = default;
-    ~Mutex() = default;
-
-    void lock();
-    void unlock();
-    bool try_lock();
-
-    static Mutex* create();
-    static Mutex* ref(Mutex*);
-    static void unref(Mutex*);
-
-private:
-    Mutex(const Mutex&) = delete;
-    Mutex& operator=(const Mutex&) = delete;
-
-    Mutex(Mutex&&) = delete;
-    Mutex& operator=(Mutex&&) = delete;
-
-    int64_t _refcnt;
-    std::deque<Coroutine*> _coroutines;
-};
-
-Mutex* Mutex::create() {
-    auto m = new Mutex;
-    m->_refcnt = 1;
-    return m;
-}
-
-Mutex* Mutex::ref(Mutex* m) {
-    m->_refcnt += 1;
-    return m;
-}
-
-void Mutex::unref(Mutex* m) {
-    assert(m->_refcnt > 0);
-    m->_refcnt -= 0;
-    if (m->_refcnt == 0) {
-        delete m;
-    }
-}
-
-void Mutex::lock() {
-    auto running = coroutine::current();
-    assert(running != nullptr);
-    if (_coroutines.empty()) {
-        _coroutines.push_back(running);
-    } else {
-        assert(_coroutines.front() != running);
-        _coroutines.push_back(running);
-        try {
-            coroutine::suspend();
-            assert(!_coroutines.empty());
-            assert(_coroutines.front() == running);
-        } catch (...) {
-            _coroutines.erase(std::remove(_coroutines.begin(), _coroutines.end(), running));
-            throw;
-        }
-    }
-}
-
-bool Mutex::try_lock() {
-    if (_coroutines.empty()) {
-        auto running = coroutine::current();
-        assert(running != nullptr);
-        _coroutines.push_back(running);
-        return true;
-    }
-    return false;
-}
-
-void Mutex::unlock() {
-    auto running_ = coroutine::current();
-    assert(running_ != nullptr);
-    assert(!_coroutines.empty());
-    assert(_coroutines.front() == running_);
-    _coroutines.pop_front();
-    if (!_coroutines.empty()) {
-        auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
-        coroutine::wakeup(pending);
-    }
-}
-
-}
-
-Mutex::Mutex() {
-    _opaque = reinterpret_cast<uintptr>(detail::Mutex::create());
-}
-
-Mutex::Mutex(const Mutex& other) {
-    auto m = reinterpret_cast<detail::Mutex*>(other._opaque);
-    _opaque = reinterpret_cast<uintptr>(detail::Mutex::ref(m));
-}
-
-Mutex::~Mutex() {
-    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
-    detail::Mutex::unref(m);
-}
-
-void Mutex::lock() {
-    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
-    m->lock();
-}
-
-void Mutex::unlock() {
-    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
-    m->unlock();
-}
-
-bool Mutex::try_lock() {
-    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
-    return m->try_lock();
-}
-
 static wild::SpinLock gProcsLocker;
 static std::unordered_map<uint32, Process*> gProcsMap;
 
@@ -1098,6 +981,123 @@ void wakeup(Coroutine *co) {
 
 wild::Any block(session_t session) {
     return process::current()->block(session);
+}
+
+namespace detail {
+
+class Mutex {
+public:
+    Mutex() = default;
+    ~Mutex() = default;
+
+    void lock();
+    void unlock();
+    bool try_lock();
+
+    static Mutex* create();
+    static Mutex* ref(Mutex*);
+    static void unref(Mutex*);
+
+private:
+    Mutex(const Mutex&) = delete;
+    Mutex& operator=(const Mutex&) = delete;
+
+    Mutex(Mutex&&) = delete;
+    Mutex& operator=(Mutex&&) = delete;
+
+    int64_t _refcnt;
+    std::deque<Coroutine*> _coroutines;
+};
+
+Mutex* Mutex::create() {
+    auto m = new Mutex;
+    m->_refcnt = 1;
+    return m;
+}
+
+Mutex* Mutex::ref(Mutex* m) {
+    m->_refcnt += 1;
+    return m;
+}
+
+void Mutex::unref(Mutex* m) {
+    assert(m->_refcnt > 0);
+    m->_refcnt -= 0;
+    if (m->_refcnt == 0) {
+        delete m;
+    }
+}
+
+void Mutex::lock() {
+    auto running = coroutine::current();
+    assert(running != nullptr);
+    if (_coroutines.empty()) {
+        _coroutines.push_back(running);
+    } else {
+        assert(_coroutines.front() != running);
+        _coroutines.push_back(running);
+        try {
+            coroutine::suspend();
+            assert(!_coroutines.empty());
+            assert(_coroutines.front() == running);
+        } catch (...) {
+            _coroutines.erase(std::remove(_coroutines.begin(), _coroutines.end(), running));
+            throw;
+        }
+    }
+}
+
+bool Mutex::try_lock() {
+    if (_coroutines.empty()) {
+        auto running = coroutine::current();
+        assert(running != nullptr);
+        _coroutines.push_back(running);
+        return true;
+    }
+    return false;
+}
+
+void Mutex::unlock() {
+    auto running_ = coroutine::current();
+    assert(running_ != nullptr);
+    assert(!_coroutines.empty());
+    assert(_coroutines.front() == running_);
+    _coroutines.pop_front();
+    if (!_coroutines.empty()) {
+        auto pending = reinterpret_cast<Coroutine*>(_coroutines.front());
+        coroutine::wakeup(pending);
+    }
+}
+
+}
+
+Mutex::Mutex() {
+    _opaque = reinterpret_cast<uintptr>(detail::Mutex::create());
+}
+
+Mutex::Mutex(const Mutex& other) {
+    auto m = reinterpret_cast<detail::Mutex*>(other._opaque);
+    _opaque = reinterpret_cast<uintptr>(detail::Mutex::ref(m));
+}
+
+Mutex::~Mutex() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    detail::Mutex::unref(m);
+}
+
+void Mutex::lock() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    m->lock();
+}
+
+void Mutex::unlock() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    m->unlock();
+}
+
+bool Mutex::try_lock() {
+    auto m = reinterpret_cast<detail::Mutex*>(_opaque);
+    return m->try_lock();
 }
 
 }
