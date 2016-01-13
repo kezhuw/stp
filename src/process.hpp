@@ -21,12 +21,7 @@ process_t spawn(std::function<void()> func, size_t addstack = 0);
 
 // std::function need copyable function object.
 // Lambda with move-only object captured is not copyable.
-template<typename Callable
-       , std::enable_if_t<std::is_convertible<Callable, std::function<void()>>::value>* = nullptr
-       , std::enable_if_t<!std::is_same<Callable, void()>::value>* = nullptr
-       , std::enable_if_t<!std::is_same<Callable, std::function<void()>>::value>* = nullptr
-       , std::enable_if_t<!std::is_copy_constructible<Callable>::value>* = nullptr
-        >
+template<typename Callable, std::enable_if_t<stp::is_moveonly_callable<Callable>::value>* = nullptr>
 process_t spawn(Callable&& callable, size_t addstack = 0) {
     std::function<void()> func = SharedCallable(new MoveonlyCallable<std::remove_cv_t<Callable>>(std::forward<Callable>(callable)));
     return spawn(func, addstack);
@@ -227,12 +222,7 @@ Coroutine* spawn(std::function<void()> func, size_t addstack = 0);
 
 // std::function need copyable function object.
 // Lambda with move-only object captured is not copyable.
-template<typename Callable
-       , std::enable_if_t<std::is_convertible<Callable, std::function<void()>>::value>* = nullptr
-       , std::enable_if_t<!std::is_same<Callable, void()>::value>* = nullptr
-       , std::enable_if_t<!std::is_same<Callable, std::function<void()>>::value>* = nullptr
-       , std::enable_if_t<!std::is_copy_constructible<Callable>::value>* = nullptr
-        >
+template<typename Callable, std::enable_if_t<stp::is_moveonly_callable<Callable>::value>* = nullptr>
 Coroutine* spawn(Callable&& callable, size_t addstack = 0) {
     std::function<void()> func = SharedCallable(new MoveonlyCallable<std::remove_cv_t<Callable>>(std::forward<Callable>(callable)));
     return spawn(func, addstack);

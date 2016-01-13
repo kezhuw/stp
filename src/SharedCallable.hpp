@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <type_traits>
+#include <functional>
 
 namespace stp {
 
@@ -41,6 +43,14 @@ public:
 
 private:
     std::shared_ptr<Callable> _callable;
+};
+
+template<typename T>
+struct is_moveonly_callable :
+    std::integral_constant<bool, !std::is_copy_constructible<T>::value
+                              && !std::is_same<T, void()>::value
+                              && !std::is_same<T, std::function<void()>>::value
+                              && std::is_convertible<T, std::function<void()>>::value> {
 };
 
 }
