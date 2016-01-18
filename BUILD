@@ -1,3 +1,13 @@
+COPTS = [
+    "-Ideps",
+    "-std=c++1y",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wconversion",
+    "-Wshadow",
+]
+
 cc_library(
     name = "stp",
     srcs = [
@@ -28,10 +38,7 @@ cc_library(
     hdrs = [
         "stp.hpp",
     ],
-    copts = [
-        "-Ideps",
-        "-std=c++1y",
-    ],
+    copts = COPTS,
     linkopts = [
         "-ldl",
         "-pthread",
