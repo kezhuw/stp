@@ -156,6 +156,9 @@ using stack_pointer_t = void *;
         WITH_LOCK(gMutex) {
             return gFrees.take();
         }
+        // Never goes here, suppress gcc warning.
+        assert(false);
+        return nullptr;
     }
 
     static void deallocContext(Context *ctx) {

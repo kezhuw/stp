@@ -33,7 +33,7 @@ static void seqService() {
 
 static stp::uint64 getSeq(stp::process_t seq) {
     auto any = stp::process::request(seq, SeqRequest{});
-    auto response = wild::Any::Cast<SeqResponse>(&any);
+    auto response = wild::SharedAny::Cast<SeqResponse*>(&any);
     return response->seq;
 }
 

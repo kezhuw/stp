@@ -64,7 +64,7 @@ namespace process {
 struct Message {
     process_t source;
     session_t session;
-    wild::Any content;
+    wild::SharedAny content;
     struct Message *next;
 };
 
@@ -140,7 +140,7 @@ deallocMessage(Message *m) {
     tFreeList.push(m);
 }
 
-Message *create(process_t source, session_t session, wild::Any content) {
+Message *create(process_t source, session_t session, wild::SharedAny content) {
     auto m = allocMessage();
     return new (m) Message{source, session, content, nullptr};
 }
@@ -202,7 +202,7 @@ set_running(Coroutine *co) {
     tCoroutine = co;
 }
 
-wild::Any suspend();
+wild::SharedAny suspend();
 void wakeup(Coroutine *co);
 
 struct ExitException : public std::exception {
@@ -214,7 +214,7 @@ struct ExitException : public std::exception {
 class Result {
 public:
 
-    void set_value(wild::Any value) {
+    void set_value(wild::SharedAny value) {
         _value = std::move(value);
     }
 
@@ -222,7 +222,7 @@ public:
         _exception = e;
     }
 
-    wild::Any get_value() {
+    wild::SharedAny get_value() {
         if (_exception) {
             std::rethrow_exception(_exception);
         }
@@ -230,7 +230,7 @@ public:
     }
 
 private:
-    wild::Any _value;
+    wild::SharedAny _value;
     std::exception_ptr _exception;
 };
 
@@ -241,11 +241,11 @@ public:
         return _context;
     }
 
-    wild::Any get_result() {
+    wild::SharedAny get_result() {
         return _result.get_value();
     }
 
-    void set_result(wild::Any value) {
+    void set_result(wild::SharedAny value) {
         _result.set_value(std::move(value));
     }
 
@@ -289,7 +289,7 @@ public:
         context::transfer(coroutine::thread_context(), _context);
     }
 
-    wild::Any yield() {
+    wild::SharedAny yield() {
         context::transfer(_context, coroutine::thread_context());
         assert(this == coroutine::current());
         return get_result();
@@ -402,6 +402,9 @@ static bool unreg(process_t pid) {
     WITH_LOCK(gProcsLocker) {
         return gProcsMap.erase(pid.Value()) == 1;
     }
+    // Never goes here, suppress gcc warning.
+    assert(false);
+    return false;
 }
 
 struct MessageDeleter {
@@ -442,13 +445,13 @@ public:
         }
     }
 
-    wild::Any suspend() {
+    wild::SharedAny suspend() {
         auto running = coroutine::current();
         _suspend_coroutines.insert(running);
         return running->yield();
     }
 
-    wild::Any block(session_t session) {
+    wild::SharedAny block(session_t session) {
         Coroutine *running = coroutine::current();
         _block_sessions[session] = running;
         return running->yield();
@@ -586,7 +589,7 @@ public:
             case MessageType::kResponse: {
                 uint32 session = -msg->session.Value();
                 if (Coroutine *co = unblock(session_t(session))) {
-                    if (auto *e = wild::Any::Cast<std::exception_ptr>(&msg->content)) {
+                    if (auto *e = wild::SharedAny::Cast<std::exception_ptr*>(&msg->content)) {
                         co->set_exception(*e);
                     } else {
                         co->set_result(std::move(msg->content));
@@ -613,11 +616,11 @@ public:
 
     void yield() {
         Session session = new_session();
-        push_message(message::create(process_t(0), sessionForResponse(session.Value()), wild::Any{}));
+        push_message(message::create(process_t(0), sessionForResponse(session.Value()), wild::SharedAny{}));
         block(session.Value());
     }
 
-    void response(process_t source, session_t session, wild::Any content) {
+    void response(process_t source, session_t session, wild::SharedAny content) {
         if (auto p = find(source)) {
             p->push_message(message::create(pid(), sessionForResponse(session), std::move(content)));
         }
@@ -671,18 +674,18 @@ public:
 
     struct HandlerInfo {
         HandlerMode mode;
-        std::function<void(wild::Any&& content)> func;
+        std::function<void(wild::SharedAny&& content)> func;
         size_t addstack;
     };
 
-    void message_callback(const std::type_info& type, std::function<void(wild::Any&& content)> func) {
+    void message_callback(const std::type_info& type, std::function<void(wild::SharedAny&& content)> func) {
         auto& handler = _message_handlers[std::type_index(type)];
         handler.mode = HandlerMode::kCallback;
         handler.func = std::move(func);
         handler.addstack = 0;
     }
 
-    void message_coroutine(const std::type_info& type, std::function<void(wild::Any&& content)> func, size_t addstack) {
+    void message_coroutine(const std::type_info& type, std::function<void(wild::SharedAny&& content)> func, size_t addstack) {
         auto& handler = _message_handlers[std::type_index(type)];
         handler.mode = HandlerMode::kCoroutine;
         handler.func = std::move(func);
@@ -779,19 +782,19 @@ session_t session() {
     return coroutine::current()->message_session();
 }
 
-void request_callback(const std::type_info& type, std::function<void(wild::Any&& content)> handler) {
+void request_callback(const std::type_info& type, std::function<void(wild::SharedAny&& content)> handler) {
     process::current()->message_callback(type, std::move(handler));
 }
 
-void request_coroutine(const std::type_info& type, std::function<void(wild::Any&& content)> handler, size_t addstack) {
+void request_coroutine(const std::type_info& type, std::function<void(wild::SharedAny&& content)> handler, size_t addstack) {
     process::current()->message_coroutine(type, std::move(handler), addstack);
 }
 
-void notification_callback(const std::type_info& type, std::function<void(wild::Any&& content)> handler) {
+void notification_callback(const std::type_info& type, std::function<void(wild::SharedAny&& content)> handler) {
     process::current()->message_callback(type, std::move(handler));
 }
 
-void notification_coroutine(const std::type_info& type, std::function<void(wild::Any&& content)> handler, size_t addstack) {
+void notification_coroutine(const std::type_info& type, std::function<void(wild::SharedAny&& content)> handler, size_t addstack) {
     process::current()->message_coroutine(type, std::move(handler), addstack);
 }
 
@@ -878,7 +881,7 @@ void release_session(session_t session) {
     current()->release_session(session);
 }
 
-wild::Any request(process_t pid, wild::Any content) {
+wild::SharedAny request(process_t pid, wild::SharedAny content) {
     Process *running = current();
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
@@ -892,7 +895,7 @@ wild::Any request(process_t pid, wild::Any content) {
     return running->block(session.Value());
 }
 
-void response(process_t source, session_t session, wild::Any content) {
+void response(process_t source, session_t session, wild::SharedAny content) {
     if (Process *running = process::current()) {
         running->response(source, session, std::move(content));
     } else if (auto p = find(source)) {
@@ -900,15 +903,15 @@ void response(process_t source, session_t session, wild::Any content) {
     }
 }
 
-void response(wild::Any content) {
+void response(wild::SharedAny content) {
     response(sender(), session(), std::move(content));
 }
 
-void send(process_t pid, wild::Any content) {
+void send(process_t pid, wild::SharedAny content) {
     send(pid, session_t(), std::move(content));
 }
 
-void send(process_t pid, session_t session, wild::Any content) {
+void send(process_t pid, session_t session, wild::SharedAny content) {
     if (auto p = find(pid)) {
         p->push_message(message::create(self(), session, std::move(content)));
     }
@@ -971,7 +974,7 @@ void exit() {
     throw coroutine::ExitException();
 }
 
-wild::Any suspend() {
+wild::SharedAny suspend() {
     return process::current()->suspend();
 }
 
@@ -979,7 +982,7 @@ void wakeup(Coroutine *co) {
     process::current()->wakeup(co);
 }
 
-wild::Any block(session_t session) {
+wild::SharedAny block(session_t session) {
     return process::current()->block(session);
 }
 
