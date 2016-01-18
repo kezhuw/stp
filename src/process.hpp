@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include "SharedCallable.hpp"
 
+#include "wild/atom.hpp"
 #include "wild/types.hpp"
 #include "wild/SharedAny.hpp"
 #include "wild/SpinLock.hpp"
@@ -186,6 +187,15 @@ void notification_coroutine(std::function<void(MessageT *message)> handler, size
 }
 
 void serve();
+
+wild::SharedAny get(wild::Atom *name);
+wild::SharedAny set(wild::Atom *name, wild::SharedAny value);
+
+template<typename PointerType>
+PointerType get(wild::Atom *name) {
+    auto value = get(name);
+    return wild::SharedAny::Cast<PointerType>(&value);
+}
 
 }
 }

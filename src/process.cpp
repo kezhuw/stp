@@ -724,6 +724,21 @@ public:
         delete p;
     }
 
+    wild::SharedAny get(wild::Atom *name) {
+        auto it = _env.find(name);
+        if (it == _env.end()) {
+            return {};
+        }
+        return it->second;
+    }
+
+    wild::SharedAny set(wild::Atom *name, wild::SharedAny newValue) {
+        auto& ref = _env[name];
+        wild::SharedAny oldValue = std::move(ref);
+        ref = std::move(newValue);
+        return oldValue;
+    }
+
 private:
 
     Process()
@@ -765,6 +780,8 @@ private:
     std::unordered_set<Coroutine*> _suspend_coroutines;
     std::unordered_map<session_t, Coroutine *> _block_sessions;
 
+    std::unordered_map<wild::Atom*, wild::SharedAny> _env;
+
     std::unordered_map<std::type_index, HandlerInfo> _message_handlers;
 
     friend void ref(Process *p);
@@ -800,6 +817,14 @@ void notification_coroutine(const std::type_info& type, std::function<void(wild:
 
 void serve() {
     process::current()->serve();
+}
+
+wild::SharedAny get(wild::Atom *name) {
+    return process::current()->get(name);
+}
+
+wild::SharedAny set(wild::Atom *name, wild::SharedAny value) {
+    return process::current()->set(name, value);
 }
 
 void ref(Process *p) {
