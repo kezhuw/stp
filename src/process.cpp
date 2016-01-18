@@ -720,7 +720,6 @@ public:
     // XXX
     // kill/unref, when to delete ?
     static void destroy(Process *p) {
-        printf("delete process: %p\n", p);
         delete p;
     }
 
@@ -842,9 +841,6 @@ void unref(Process *p) {
 void retire(Process *p) {
     if (unreg(p->pid())) {
         process::unref(p);
-        printf("unregister succ %p\n", p);
-    } else {
-        printf("unregister fail %p\n", p);
     }
 }
 
