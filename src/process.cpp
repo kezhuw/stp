@@ -48,6 +48,10 @@ namespace time {
 void stop();
 }
 
+namespace event {
+void load();
+}
+
 namespace process {
 class Process;
 }
@@ -651,7 +655,7 @@ public:
     static Process *create(std::function<void()> func, size_t addstack) {
         auto p = new Process();
         p->_pid = reg(p);
-        p->spawn(std::move(func), addstack);
+        p->spawn([func = std::move(func)] { event::load(); func(); }, addstack);
         return p;
     }
 

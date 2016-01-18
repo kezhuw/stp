@@ -15,6 +15,8 @@ cc_library(
         "src/context.hpp",
         "src/main.cpp",
         "src/main.hpp",
+	"src/event.cpp",
+	"src/event.hpp",
         "src/sched.hpp",
         "src/fd.hpp",
         "src/io.cpp",
