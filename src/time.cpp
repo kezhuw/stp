@@ -168,10 +168,8 @@ _tick(struct Timer *t) {
 
 void
 _update(struct Timer *t, uint64 time) {
-    if (time > t->time) {
-        for (uint64 i=0, n = time - t->time; i<n; ++i) {
-            _tick(t);
-        }
+    while (t->time < time) {
+        _tick(t);
     }
 }
 
