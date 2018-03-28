@@ -911,13 +911,12 @@ wild::SharedAny request(process_t pid, wild::SharedAny content) {
     if (UNLIKELY(!running)) {
         throw std::runtime_error("not in process");
     }
-    Session session = running->new_session();
     if (auto p = find(pid)) {
+        Session session = running->new_session();
         p->push_message(message::create(running->pid(), session.Value(), content));
-    } else {
-        running->push_message(message::create(pid, sessionForResponse(session.Value()), std::make_exception_ptr(ProcessNotExist{})));
+        return running->block(session.Value());
     }
-    return running->block(session.Value());
+    throw ProcessNotExist{};
 }
 
 void response(process_t source, session_t session, wild::SharedAny content) {
