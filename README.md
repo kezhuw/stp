@@ -57,11 +57,11 @@ for (;;) {
 
 
 ## TODO
-[ ] How to bootstrap stp and application code ?
-[ ] Update to C++ 17
-[ ] Split exported and internal head files
-[ ] Channel support, mailbox is a process level channel
-[ ] Nonblocking file operations base on aio
+- [ ] How to bootstrap stp and application code ?
+- [ ] Update to C++ 17
+- [ ] Split exported and internal head files
+- [ ] Channel support, mailbox is a process level channel
+- [ ] Nonblocking file operations base on aio
 
 
 ## Inspiration
