@@ -32,6 +32,7 @@ read_full(int fd, byte_t *buf, size_t len) {
             if (rd != 0) {
                 // XXX unexpected EOF
             }
+            [[fallthrough]];
         default:
             return std::make_tuple(rd, err);
         }

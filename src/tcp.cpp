@@ -346,6 +346,7 @@ accept(const wild::Fd& fd, string *from) {
             switch (err) {
             case EAGAIN:
                 fd::wait(listener, fd::Event::kRead);
+                [[fallthrough]];
             case EINTR:
                 continue;
             default:
