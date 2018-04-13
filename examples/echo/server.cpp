@@ -8,8 +8,8 @@
 
 #include <unistd.h>
 
-extern "C" void
-stp_main() {
+void
+entry() {
     wild::Fd listener;
     std::error_condition error;
     std::tie(listener, error) = stp::net::tcp::listen("tcp4://*:3000");
@@ -46,6 +46,6 @@ stp_main() {
 }
 
 int
-main(int argc, const char *args[]) {
-    return stp::main(argc, args);
+main() {
+    return stp::main(entry);
 }

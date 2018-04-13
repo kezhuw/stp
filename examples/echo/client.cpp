@@ -22,7 +22,7 @@ struct SeqResponse {
 };
 
 static void seqService() {
-    int seqn = 0;
+    stp::uint64 seqn = 0;
     stp::process::request_callback<SeqRequest>([&seqn](SeqRequest *) {
         SeqResponse response;
         response.seq = ++seqn;
@@ -78,8 +78,8 @@ static void client(stp::uint64 id, stp::process_t super, stp::process_t seq) {
     }
 }
 
-extern "C" void
-stp_main() {
+void
+entry() {
     auto self = stp::process::self();
     auto seq = stp::process::spawn(seqService);
 
@@ -100,6 +100,6 @@ stp_main() {
 }
 
 int
-main(int argc, const char *args[]) {
-    return stp::main(argc, args);
+main() {
+    return stp::main(entry);
 }
